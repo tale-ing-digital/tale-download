@@ -9,7 +9,14 @@
 
 ## Ajustes Funcionales
 
-- [ ] Agregar endpoints BI para obtener lista de proyectos únicos
+- [x] Agregar endpoints BI para obtener lista de proyectos únicos
+- [x] Agregar endpoints BI para obtener lista de tipos de documento únicos
+- [x] Implementar Select/Autocomplete en frontend para Proyecto y Tipo
+- [x] Implementar paginación (25 por página)
+- [x] Lista de documentos solo visible tras búsqueda explícita
+- [x] Selección múltiple de documentos
+- [x] "Seleccionar todos" limitado a resultados del filtro actual
+- [ ] Commit 2: Ajustes funcionales
 - [ ] Agregar endpoints BI para obtener lista de tipos de documento únicos
 - [ ] Implementar componente Select/Autocomplete para Código de Proyecto
 - [ ] Implementar componente Select/Autocomplete para Tipo de Documento

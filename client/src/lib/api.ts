@@ -56,6 +56,8 @@ export interface DocumentFilters {
   document_type?: string;
   start_date?: string;
   end_date?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface DownloadZipRequest {
@@ -78,6 +80,16 @@ export async function healthCheck(): Promise<HealthResponse> {
 export async function getProjects(): Promise<ProjectListResponse> {
   const response = await apiClient.get<ProjectListResponse>('/projects');
   return response.data;
+}
+
+export async function getProjectOptions(): Promise<string[]> {
+  const response = await apiClient.get<{ options: string[] }>('/filters/projects');
+  return response.data.options;
+}
+
+export async function getDocumentTypeOptions(): Promise<string[]> {
+  const response = await apiClient.get<{ options: string[] }>('/filters/document-types');
+  return response.data.options;
 }
 
 export async function getDocuments(filters?: DocumentFilters): Promise<DocumentListResponse> {
