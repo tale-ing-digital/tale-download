@@ -11,7 +11,9 @@ import {
   Filter,
   Grid,
   List,
-  MoreHorizontal
+  MoreHorizontal,
+  Package,
+  Calendar
 } from "lucide-react"
 
 export const Icons = {
@@ -27,8 +29,20 @@ export const Icons = {
   filter: Filter,
   grid: Grid,
   list: List,
-  more: MoreHorizontal
+  more: MoreHorizontal,
+  package: Package,
+  calendar: Calendar
 }
+
+// Export individual icons for direct use
+export const SearchIcon = Search;
+export const DownloadIcon = Download;
+export const FileTextIcon = FileText;
+export const FolderIcon = Folder;
+export const PackageIcon = Package;
+export const CalendarIcon = Calendar;
+export const AlertIcon = AlertCircle;
+export const FilterIcon = Filter;
 
 // Configuración global de estilo para iconos
 // Stroke width: 1.5px para estilo "lineal fino"

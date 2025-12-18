@@ -1,184 +1,300 @@
-import { useState } from "react"
-import { Layout } from "@/components/layout"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Icons, iconStyle } from "@/lib/icons"
+import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
+import { Layout } from '@/components/layout';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { SearchIcon, DownloadIcon, PackageIcon, FileTextIcon, CalendarIcon } from '@/lib/icons';
+import {
+  getProjects,
+  getDocuments,
+  downloadDocument,
+  downloadProjectZip,
+  handleApiError,
+  type Document,
+  type ProjectSummary,
+  type DocumentFilters,
+} from '@/lib/api';
 
 export default function Home() {
-  const [isLoading, setIsLoading] = useState(false)
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  
+  const [filters, setFilters] = useState<DocumentFilters>({
+    project_code: '',
+    document_type: '',
+    start_date: '',
+    end_date: '',
+  });
 
-  // Simulación de carga inicial
-  useState(() => {
-    setIsLoading(true)
-    const timer = setTimeout(() => setIsLoading(false), 800)
-    return () => clearTimeout(timer)
-  })
+  useEffect(() => {
+    loadProjects();
+    loadDocuments();
+  }, []);
+
+  const loadProjects = async () => {
+    try {
+      const response = await getProjects();
+      setProjects(response.projects);
+    } catch (error) {
+      toast.error(handleApiError(error));
+    }
+  };
+
+  const loadDocuments = async (customFilters?: DocumentFilters) => {
+    setLoading(true);
+    try {
+      const activeFilters = customFilters || filters;
+      const cleanFilters: DocumentFilters = {};
+      
+      if (activeFilters.project_code) cleanFilters.project_code = activeFilters.project_code;
+      if (activeFilters.document_type) cleanFilters.document_type = activeFilters.document_type;
+      if (activeFilters.start_date) cleanFilters.start_date = activeFilters.start_date;
+      if (activeFilters.end_date) cleanFilters.end_date = activeFilters.end_date;
+      
+      const response = await getDocuments(Object.keys(cleanFilters).length > 0 ? cleanFilters : undefined);
+      setDocuments(response.documents);
+      
+      if (response.total === 0) {
+        toast.info('No se encontraron documentos con los filtros aplicados');
+      }
+    } catch (error) {
+      toast.error(handleApiError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = () => {
+    loadDocuments();
+  };
+
+  const handleDownloadDocument = async (codigo: string) => {
+    setDownloading(codigo);
+    try {
+      await downloadDocument(codigo);
+      toast.success('Documento descargado exitosamente');
+    } catch (error) {
+      toast.error(handleApiError(error));
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const handleDownloadProjectZip = async (projectCode: string) => {
+    setDownloading(projectCode);
+    try {
+      await downloadProjectZip(projectCode);
+      toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`);
+    } catch (error) {
+      toast.error(handleApiError(error));
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const handleProjectClick = (projectCode: string) => {
+    const newFilters = { ...filters, project_code: projectCode };
+    setFilters(newFilters);
+    loadDocuments(newFilters);
+  };
+
+  const handleClearFilters = () => {
+    const emptyFilters: DocumentFilters = {
+      project_code: '',
+      document_type: '',
+      start_date: '',
+      end_date: '',
+    };
+    setFilters(emptyFilters);
+    loadDocuments(emptyFilters);
+  };
 
   return (
     <Layout>
-      {/* Hero Section Minimalista */}
-      <section className="mb-12 space-y-4 text-center md:text-left max-w-3xl mx-auto md:mx-0">
-        <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
-          Centro de Documentos
-        </h1>
-        <p className="text-lg text-muted-foreground max-w-2xl">
-          Accede, consulta y descarga la documentación técnica de tus proyectos de forma centralizada y segura.
-        </p>
-      </section>
-
-      {/* Search & Filter Bar */}
-      <section className="mb-8 sticky top-20 z-40">
-        <Card className="border-none shadow-lg bg-white/90 backdrop-blur-sm">
-          <CardContent className="p-4 flex flex-col md:flex-row gap-4 items-center">
-            <div className="relative flex-1 w-full">
-              <Icons.search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input 
-                placeholder="Buscar por código, nombre de proyecto o tipo..." 
-                className="pl-10 h-12 text-base border-transparent bg-secondary/50 focus:bg-white transition-all"
-              />
+      <div className="min-h-screen bg-background">
+        <section className="py-16 px-4">
+          <div className="container max-w-7xl">
+            <div className="text-center mb-12">
+              <h1 className="text-4xl font-bold text-foreground mb-4">
+                Exportación Documental
+              </h1>
+              <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+                Consulta y descarga documentos desde Business Intelligence
+              </p>
             </div>
-            <div className="flex gap-2 w-full md:w-auto">
-              <Button variant="outline" className="flex-1 md:flex-none gap-2 h-12 border-dashed">
-                <Icons.filter {...iconStyle} />
-                Filtros
-              </Button>
-              <Button variant="talePrimary" className="flex-1 md:flex-none h-12 px-8 shadow-md shadow-primary/20">
-                Buscar
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
 
-      {/* Results Grid */}
-      <section className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {isLoading ? (
-          // Loading Skeletons
-          Array.from({ length: 6 }).map((_, i) => (
-            <Card key={i} className="border-none shadow-sm bg-muted/20">
-              <CardHeader className="pb-4">
-                <Skeleton className="h-6 w-3/4 mb-2" />
-                <Skeleton className="h-4 w-1/2" />
-              </CardHeader>
-              <CardContent>
-                <Skeleton className="h-24 w-full rounded-md" />
+            <Card className="mb-8 backdrop-blur-sm bg-card/95 border-border/50">
+              <CardContent className="pt-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                  <Input
+                    placeholder="Código de proyecto"
+                    value={filters.project_code || ''}
+                    onChange={(e) => setFilters({ ...filters, project_code: e.target.value })}
+                  />
+                  <Input
+                    placeholder="Tipo de documento"
+                    value={filters.document_type || ''}
+                    onChange={(e) => setFilters({ ...filters, document_type: e.target.value })}
+                  />
+                  <Input
+                    type="date"
+                    placeholder="Fecha inicio"
+                    value={filters.start_date || ''}
+                    onChange={(e) => setFilters({ ...filters, start_date: e.target.value })}
+                  />
+                  <Input
+                    type="date"
+                    placeholder="Fecha fin"
+                    value={filters.end_date || ''}
+                    onChange={(e) => setFilters({ ...filters, end_date: e.target.value })}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <Button onClick={handleSearch} variant="talePrimary" className="flex-1">
+                    <SearchIcon className="mr-2" />
+                    Buscar
+                  </Button>
+                  <Button onClick={handleClearFilters} variant="taleSecondary">
+                    Limpiar
+                  </Button>
+                </div>
               </CardContent>
             </Card>
-          ))
-        ) : (
-          // Document Cards
-          <>
-            <DocumentCard 
-              title="Planos Estructurales - Torre A"
-              project="Residencial Miraflores"
-              type="PDF"
-              size="24 MB"
-              date="17 Dic 2025"
-              status="approved"
-            />
-            <DocumentCard 
-              title="Memoria Descriptiva v2.0"
-              project="Oficinas San Isidro"
-              type="DOCX"
-              size="1.2 MB"
-              date="16 Dic 2025"
-              status="review"
-            />
-            <DocumentCard 
-              title="Levantamiento Topográfico"
-              project="Lote 45 - Surco"
-              type="DWG"
-              size="156 MB"
-              date="15 Dic 2025"
-              status="approved"
-            />
-             <DocumentCard 
-              title="Presupuesto General"
-              project="Residencial Miraflores"
-              type="XLSX"
-              size="4.5 MB"
-              date="14 Dic 2025"
-              status="pending"
-            />
-             <DocumentCard 
-              title="Render Fachada Principal"
-              project="Oficinas San Isidro"
-              type="JPG"
-              size="12 MB"
-              date="12 Dic 2025"
-              status="approved"
-            />
-             <DocumentCard 
-              title="Licencia de Construcción"
-              project="Lote 45 - Surco"
-              type="PDF"
-              size="8.1 MB"
-              date="10 Dic 2025"
-              status="approved"
-            />
-          </>
-        )}
-      </section>
-    </Layout>
-  )
-}
 
-function DocumentCard({ title, project, type, size, date, status }: any) {
-  return (
-    <Card className="group hover:border-primary/50 hover:shadow-md transition-all duration-300 cursor-pointer overflow-hidden">
-      <CardHeader className="pb-3">
-        <div className="flex justify-between items-start gap-2">
-          <Badge variant="outline" className="font-normal text-muted-foreground bg-secondary/50 border-transparent">
-            {project}
-          </Badge>
-          <StatusBadge status={status} />
-        </div>
-        <CardTitle className="text-lg mt-2 group-hover:text-primary transition-colors line-clamp-1">
-          {title}
-        </CardTitle>
-        <CardDescription className="flex items-center gap-2 text-xs">
-          <span>{date}</span>
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
-          <span>{size}</span>
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="h-24 rounded-md bg-secondary/30 border border-dashed border-secondary flex items-center justify-center group-hover:bg-primary/5 group-hover:border-primary/20 transition-all">
-          <div className="flex flex-col items-center gap-1 text-muted-foreground group-hover:text-primary/80">
-            <Icons.file className="h-8 w-8" strokeWidth={1} />
-            <span className="text-xs font-medium">{type}</span>
+            {projects.length > 0 && (
+              <div className="mb-12">
+                <h2 className="text-2xl font-semibold text-foreground mb-6">Proyectos</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {projects.map((project) => (
+                    <Card
+                      key={project.codigo_proyecto}
+                      className="group hover:border-primary/50 transition-all duration-200 cursor-pointer"
+                      onClick={() => handleProjectClick(project.codigo_proyecto)}
+                    >
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                          <span className="flex items-center gap-2">
+                            <PackageIcon />
+                            {project.codigo_proyecto}
+                          </span>
+                          <Badge variant="tale">{project.total_documentos}</Badge>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+                          <CalendarIcon className="w-4 h-4" />
+                          <span>{project.ultima_actualizacion}</span>
+                        </div>
+                        <Button
+                          variant="taleSecondary"
+                          size="sm"
+                          className="w-full"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownloadProjectZip(project.codigo_proyecto);
+                          }}
+                          disabled={downloading === project.codigo_proyecto}
+                        >
+                          <DownloadIcon className="mr-2" />
+                          {downloading === project.codigo_proyecto ? 'Descargando...' : 'Descargar ZIP'}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <h2 className="text-2xl font-semibold text-foreground mb-6">
+                Documentos
+                {documents.length > 0 && (
+                  <span className="text-muted-foreground text-lg ml-2">
+                    ({documents.length})
+                  </span>
+                )}
+              </h2>
+
+              {loading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <Card key={i}>
+                      <CardHeader>
+                        <Skeleton className="h-6 w-3/4" />
+                      </CardHeader>
+                      <CardContent>
+                        <Skeleton className="h-4 w-full mb-2" />
+                        <Skeleton className="h-4 w-2/3 mb-4" />
+                        <Skeleton className="h-10 w-full" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              ) : documents.length === 0 ? (
+                <Card className="text-center py-12">
+                  <CardContent>
+                    <FileTextIcon className="mx-auto mb-4 w-12 h-12 text-muted-foreground" />
+                    <p className="text-muted-foreground">
+                      No se encontraron documentos. Ajusta los filtros de búsqueda.
+                    </p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {documents.map((doc) => (
+                    <Card
+                      key={doc.codigo_proforma}
+                      className="group hover:border-primary/50 transition-all duration-200"
+                    >
+                      <CardHeader>
+                        <CardTitle className="text-base flex items-center justify-between">
+                          <span className="truncate">{doc.documento_cliente}</span>
+                          <Badge variant="tale">{doc.tipo_documento}</Badge>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-2 text-sm text-muted-foreground mb-4">
+                          <div className="flex justify-between">
+                            <span className="font-medium">Proforma:</span>
+                            <span>{doc.codigo_proforma}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-medium">Proyecto:</span>
+                            <span>{doc.codigo_proyecto}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-medium">Unidad:</span>
+                            <span>{doc.codigo_unidad}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="font-medium">Fecha:</span>
+                            <span>{doc.fecha_carga}</span>
+                          </div>
+                        </div>
+                        <Button
+                          variant="talePrimary"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => handleDownloadDocument(doc.codigo_proforma)}
+                          disabled={downloading === doc.codigo_proforma}
+                        >
+                          <DownloadIcon className="mr-2" />
+                          {downloading === doc.codigo_proforma ? 'Descargando...' : 'Descargar PDF'}
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="mt-4 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity transform translate-y-2 group-hover:translate-y-0 duration-200">
-          <Button size="sm" variant="taleSecondary" className="h-8 text-xs gap-1">
-            <Icons.download className="h-3 w-3" />
-            Descargar
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles = {
-    approved: "bg-emerald-50 text-emerald-700 border-emerald-100",
-    review: "bg-amber-50 text-amber-700 border-amber-100",
-    pending: "bg-slate-50 text-slate-600 border-slate-100"
-  }
-  
-  const labels = {
-    approved: "Aprobado",
-    review: "En Revisión",
-    pending: "Pendiente"
-  }
-
-  return (
-    <span className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${styles[status as keyof typeof styles]}`}>
-      {labels[status as keyof typeof labels]}
-    </span>
-  )
+        </section>
+      </div>
+    </Layout>
+  );
 }

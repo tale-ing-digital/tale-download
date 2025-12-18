@@ -1,0 +1,171 @@
+import axios, { AxiosInstance, AxiosError } from 'axios';
+
+// ============================================================================
+// API CLIENT CONFIGURATION
+// ============================================================================
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+
+const apiClient: AxiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface Document {
+  codigo_proforma: string;
+  documento_cliente: string;
+  codigo_proyecto: string;
+  codigo_unidad: string;
+  url: string;
+  nombre_archivo: string;
+  fecha_carga: string;
+  tipo_documento: string;
+}
+
+export interface ProjectSummary {
+  codigo_proyecto: string;
+  total_documentos: number;
+  ultima_actualizacion: string;
+}
+
+export interface DocumentListResponse {
+  total: number;
+  documents: Document[];
+}
+
+export interface ProjectListResponse {
+  total: number;
+  projects: ProjectSummary[];
+}
+
+export interface HealthResponse {
+  status: string;
+  version: string;
+  redshift_connected: boolean;
+}
+
+export interface DocumentFilters {
+  project_code?: string;
+  document_type?: string;
+  start_date?: string;
+  end_date?: string;
+}
+
+export interface DownloadZipRequest {
+  project_code?: string;
+  document_type?: string;
+  start_date?: string;
+  end_date?: string;
+  document_ids?: string[];
+}
+
+// ============================================================================
+// API FUNCTIONS
+// ============================================================================
+
+export async function healthCheck(): Promise<HealthResponse> {
+  const response = await apiClient.get<HealthResponse>('/health');
+  return response.data;
+}
+
+export async function getProjects(): Promise<ProjectListResponse> {
+  const response = await apiClient.get<ProjectListResponse>('/projects');
+  return response.data;
+}
+
+export async function getDocuments(filters?: DocumentFilters): Promise<DocumentListResponse> {
+  const response = await apiClient.get<DocumentListResponse>('/documents', {
+    params: filters,
+  });
+  return response.data;
+}
+
+export async function downloadDocument(codigoProforma: string): Promise<void> {
+  const response = await apiClient.get(`/download/document/${codigoProforma}`, {
+    responseType: 'blob',
+  });
+  
+  const contentDisposition = response.headers['content-disposition'];
+  let filename = `${codigoProforma}.pdf`;
+  
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+    if (filenameMatch) {
+      filename = filenameMatch[1];
+    }
+  }
+  
+  const blob = new Blob([response.data], { type: 'application/pdf' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadZip(request: DownloadZipRequest): Promise<void> {
+  const response = await apiClient.post('/download/zip', request, {
+    responseType: 'blob',
+  });
+  
+  const contentDisposition = response.headers['content-disposition'];
+  let filename = 'tale_documents.zip';
+  
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+    if (filenameMatch) {
+      filename = filenameMatch[1];
+    }
+  }
+  
+  const blob = new Blob([response.data], { type: 'application/zip' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export async function downloadProjectZip(projectCode: string): Promise<void> {
+  const response = await apiClient.get(`/download/zip/project/${projectCode}`, {
+    responseType: 'blob',
+  });
+  
+  const blob = new Blob([response.data], { type: 'application/zip' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${projectCode}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+}
+
+export function handleApiError(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const axiosError = error as AxiosError<{ detail?: string; error?: string }>;
+    
+    if (axiosError.response) {
+      const detail = axiosError.response.data?.detail || axiosError.response.data?.error;
+      return detail || `Error ${axiosError.response.status}: ${axiosError.response.statusText}`;
+    } else if (axiosError.request) {
+      return 'Error de conexión. Verifique que el backend esté ejecutándose.';
+    }
+  }
+  
+  return 'Error desconocido. Intente nuevamente.';
+}
