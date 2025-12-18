@@ -16,11 +16,18 @@
 - [x] Lista de documentos solo visible tras búsqueda explícita
 - [x] Selección múltiple de documentos
 - [x] "Seleccionar todos" limitado a resultados del filtro actual
-- [ ] Commit 2: Ajustes funcionales
-- [ ] Agregar endpoints BI para obtener lista de tipos de documento únicos
-- [ ] Implementar componente Select/Autocomplete para Código de Proyecto
-- [ ] Implementar componente Select/Autocomplete para Tipo de Documento
-- [ ] Cambiar comportamiento: lista de documentos solo visible tras búsqueda explícita
+- [x] Commit 2: Ajustes funcionales
+
+## Mejoras Visuales Controladas
+
+- [x] Toast loading para estado "Procesando exportación"
+- [x] Toast success para confirmación de descarga
+- [x] Toast error para errores de descarga
+- [x] Skeleton para carga de resultados de búsqueda
+- [x] Animación fadeIn sutil (200ms) en cards
+- [x] Hover con sombra en cards (transición 200ms)
+- [x] Ring visual en documentos seleccionados
+- [ ] Commit 3: Mejoras visuales
 - [ ] Implementar paginación de resultados (25 por página)
 - [ ] Implementar funcionalidad "Seleccionar todos" limitada a resultados del filtro actual
 - [ ] Preparar arquitectura para filtros futuros (Unidad, Cliente)

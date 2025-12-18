@@ -120,11 +120,12 @@ export default function Home() {
 
   const handleDownloadDocument = async (codigo: string) => {
     setDownloading(codigo);
+    const toastId = toast.loading('Procesando exportación...');
     try {
       await downloadDocument(codigo);
-      toast.success('Documento descargado exitosamente');
+      toast.success('Documento descargado exitosamente', { id: toastId });
     } catch (error) {
-      toast.error(handleApiError(error));
+      toast.error(handleApiError(error), { id: toastId });
     } finally {
       setDownloading(null);
     }
@@ -132,11 +133,12 @@ export default function Home() {
 
   const handleDownloadProjectZip = async (projectCode: string) => {
     setDownloading(projectCode);
+    const toastId = toast.loading(`Generando ZIP del proyecto ${projectCode}...`);
     try {
       await downloadProjectZip(projectCode);
-      toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`);
+      toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`, { id: toastId });
     } catch (error) {
-      toast.error(handleApiError(error));
+      toast.error(handleApiError(error), { id: toastId });
     } finally {
       setDownloading(null);
     }
@@ -149,11 +151,12 @@ export default function Home() {
     }
 
     setDownloading('selected');
+    const toastId = toast.loading(`Procesando ${selectedDocuments.size} documentos...`);
     try {
       await downloadZip({ document_ids: Array.from(selectedDocuments) });
-      toast.success(`${selectedDocuments.size} documentos descargados exitosamente`);
+      toast.success(`${selectedDocuments.size} documentos descargados exitosamente`, { id: toastId });
     } catch (error) {
-      toast.error(handleApiError(error));
+      toast.error(handleApiError(error), { id: toastId });
     } finally {
       setDownloading(null);
     }
@@ -284,7 +287,7 @@ export default function Home() {
                   {projects.map((project) => (
                     <Card
                       key={project.codigo_proyecto}
-                      className="group hover:border-primary/50 transition-all duration-200 cursor-pointer"
+                      className="group hover:border-primary/50 hover:shadow-md transition-all duration-200 cursor-pointer animate-fadeIn"
                       onClick={() => handleProjectClick(project.codigo_proyecto)}
                     >
                       <CardHeader>
@@ -385,8 +388,8 @@ export default function Home() {
                         return (
                           <Card
                             key={doc.codigo_proforma}
-                            className={`group hover:border-primary/50 transition-all duration-200 cursor-pointer ${
-                              isSelected ? 'border-primary ring-2 ring-primary/20' : ''
+                            className={`group hover:border-primary/50 hover:shadow-md transition-all duration-200 cursor-pointer animate-fadeIn ${
+                              isSelected ? 'border-primary ring-2 ring-primary/20 shadow-md' : ''
                             }`}
                             onClick={() => {
                               const newSelected = new Set(selectedDocuments);
