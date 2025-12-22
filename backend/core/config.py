@@ -2,7 +2,9 @@
 Configuración de entorno para TaleDownload Backend
 """
 import os
-from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Settings:
     """Configuración de la aplicación"""

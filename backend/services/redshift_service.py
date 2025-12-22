@@ -45,7 +45,9 @@ class RedshiftService:
         if not self.connection_pool:
             raise RuntimeError("Redshift connection not available. Please configure REDSHIFT_* environment variables.")
         
-        if not query.strip().upper().startswith("SELECT"):
+        # Permitir SELECT y WITH (CTEs - Common Table Expressions)
+        query_upper = query.strip().upper()
+        if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
             raise ValueError("Only SELECT queries are allowed (read-only)")
         
         conn = None
@@ -105,6 +107,8 @@ class RedshiftService:
         Obtiene documentos con filtros por proyecto real (codigo_proyecto)
         Relación: archivos → proforma_unidad → proyectos
         
+        Usa clasificación homologada con cortafuegos para evitar falsos positivos.
+        
         Args:
             project_code: Código del proyecto
             document_types: Lista de tipos de documento para filtrado
@@ -129,77 +133,146 @@ class RedshiftService:
             conditions.append("a.fecha_carga <= %s")
             params_list.append(end_date)
         
-        # MULTI-SELECCIÓN de tipos (frontend envía lista)
-        # Si viene lista de tipos, hacemos OR de los tipos
-        if document_types and len(document_types) > 0:
-            type_conditions = []
-            for doc_type in document_types:
-                type_conditions.append(
-                    f"""CASE 
-                        WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%voucher%%' OR
-                             LOWER(COALESCE(a.nombre, '')) LIKE '%%constancia%%' OR
-                             LOWER(COALESCE(a.nombre, '')) LIKE '%%transf%%' OR
-                             LOWER(COALESCE(a.nombre, '')) LIKE '%%vou%%' OR
-                             LOWER(COALESCE(a.nombre, '')) LIKE '%%pago%%' OR
-                             LOWER(COALESCE(a.nombre, '')) LIKE '%%sep%%' THEN 'Voucher'
-                        WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%minuta%%' THEN 'Minuta'
-                        WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%adenda%%' THEN 'Adenda'
-                        WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%carta%%' OR LOWER(COALESCE(a.nombre, '')) LIKE '%%aprobac%%' THEN 'Carta de Aprobación'
-                        ELSE 'Otro'
-                    END = %s"""
-                )
-                params_list.append(doc_type)
-            
-            if type_conditions:
-                conditions.append(f"({' OR '.join(type_conditions)})")
-        
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
-        # IMPORTANT: LIMIT and OFFSET must be literal integers, NOT parametrized
+        # QUERY BASE con CTE para normalización
         query = f"""
-        SELECT 
-            a.codigo_proforma,
-            pu.documento_cliente,
-            c.nombres || ' ' || c.apellidos AS nombre_cliente,
-            pu.codigo_proyecto,
-            pu.codigo_unidad,
+        WITH base AS (
+            SELECT
+                a.codigo_proforma,
+                pu.documento_cliente,
+                c.nombres || ' ' || c.apellidos AS nombre_cliente,
+                pu.codigo_proyecto,
+                pu.codigo_unidad,
+                CASE
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%departamento%%' THEN 'DPTO'
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%estacionamiento%%' THEN 'EST'
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%depósito%%' OR 
+                         LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%deposito%%' THEN 'DEP'
+                    ELSE 'OTRO'
+                END AS tipo_unidad,
+                a.url,
+                a.nombre as nombre_archivo,
+                a.montaje,
+                TO_CHAR(a.fecha_carga, 'YYYY-MM-DD HH24:MI:SS') as fecha_carga,
+                
+                /* Normalización 1 sola vez */
+                TRIM(
+                    REGEXP_REPLACE(
+                        TRANSLATE(
+                            LOWER(COALESCE(a.nombre,'') || ' ' || COALESCE(a.montaje,'')),
+                            'áéíóúüñ',
+                            'aeiouun'
+                        ),
+                        '[^a-z0-9]+',
+                        ' '
+                    )
+                ) AS txt
+                
+            FROM tale.archivos a
+            INNER JOIN tale.proforma_unidad pu ON a.codigo_proforma = pu.codigo_proforma
+            LEFT JOIN tale.clientes c ON pu.documento_cliente = c.documento
+            WHERE a.entidad <> 'Unidad' AND {where_clause}
+        )
+        SELECT
+            base.codigo_proforma,
+            base.documento_cliente,
+            base.nombre_cliente,
+            base.codigo_proyecto,
+            base.codigo_unidad,
+            base.tipo_unidad,
+            base.url,
+            base.nombre_archivo,
+            base.montaje,
+            base.fecha_carga,
+            
             CASE
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%departamento%%' THEN 'DPTO'
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%estacionamiento%%' THEN 'EST'
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%depósito%%' OR 
-                     LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%deposito%%' THEN 'DEP'
-                ELSE 'OTRO'
-            END AS tipo_unidad,
-            a.url,
-            a.nombre as nombre_archivo,
-            a.montaje,
-            TO_CHAR(a.fecha_carga, 'YYYY-MM-DD HH24:MI:SS') as fecha_carga,
-            CASE
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%voucher%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%constancia%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%transf%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%vou%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%pago%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%sep%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%voucher%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%pago%%' THEN 'Voucher'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%minuta%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%minuta%%' THEN 'Minuta'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%adenda%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%adenda%%' THEN 'Adenda'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%carta%%' OR 
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%aprobac%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%carta%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%aprobac%%' THEN 'Carta de Aprobación'
+                /* A) CORTAFUEGOS: bloquear falsos positivos antes de clasificar */
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )(contrato|cont)( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                THEN 'Otro'
+                
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )(cronograma|crono)( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
+                THEN 'Otro'
+                
+                /* 1) MINUTA (incluye preminuta / pre minuta) */
+                WHEN
+                    STRPOS(txt, 'minuta') > 0
+                    OR STRPOS(txt, 'preminuta') > 0
+                    OR STRPOS(txt, 'pre minuta') > 0
+                THEN 'Minuta'
+                
+                /* 2) ADENDA */
+                WHEN
+                    STRPOS(txt, 'adenda') > 0
+                    OR STRPOS(txt, 'addenda') > 0
+                    OR STRPOS(txt, 'addendum') > 0
+                    OR STRPOS(txt, 'enmienda') > 0
+                    OR STRPOS(txt, 'prorroga') > 0
+                    OR STRPOS(txt, 'ampliacion') > 0
+                    OR STRPOS(txt, 'modificac') > 0
+                    OR STRPOS(txt, 'renuncia hipoteca') > 0
+                THEN 'Adenda'
+                
+                /* 3) CARTA DE APROBACIÓN */
+                WHEN
+                    (
+                        STRPOS(txt, 'carta') > 0
+                        AND REGEXP_INSTR(
+                            txt,
+                            '(^| )(aprob|preaprob|preacept|precal|credito|autoriz|conformidad|validac|approval|banco|bcp|ibk|interbank|bbva|scotia)( |$)'
+                        ) > 0
+                    )
+                    OR REGEXP_INSTR(txt, '(^| )aprobacion( |$)') > 0
+                    OR REGEXP_INSTR(txt, '(^| )aprobacion( |$).*(gerencia|banco)( |$)') > 0
+                    OR REGEXP_INSTR(txt, '(^| )correo( |$).*aprob') > 0
+                THEN 'Carta de Aprobación'
+                
+                /* 4) VOUCHER (señales fuertes) */
+                WHEN
+                    STRPOS(txt, 'voucher') > 0
+                    OR STRPOS(txt, 'vaucher') > 0
+                    OR REGEXP_INSTR(txt, '(^| )vou( |$)') > 0
+                    OR STRPOS(txt, 'comprobante') > 0
+                    OR STRPOS(txt, 'recibo') > 0
+                    OR STRPOS(txt, 'transfer') > 0
+                    OR STRPOS(txt, 'transf') > 0
+                    OR STRPOS(txt, 'deposit') > 0
+                    OR STRPOS(txt, 'operacion') > 0
+                    OR STRPOS(txt, 'interbanc') > 0
+                    OR (
+                        STRPOS(txt, 'constancia') > 0
+                        AND REGEXP_INSTR(txt, '(^| )(transfer|transf|pago|abono|deposit|operacion)( |$)') > 0
+                    )
+                THEN 'Voucher'
+                
+                /* 5) VOUCHER (señal débil: "pago" pero ya bloqueamos cronogramas arriba) */
+                WHEN REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
+                THEN 'Voucher'
+                
                 ELSE 'Otro'
-            END as tipo_documento
-        FROM tale.archivos a
-        INNER JOIN tale.proforma_unidad pu ON a.codigo_proforma = pu.codigo_proforma
-        LEFT JOIN tale.clientes c ON pu.documento_cliente = c.documento
-        WHERE a.entidad <> 'Unidad' AND {where_clause}
-        ORDER BY a.fecha_carga DESC
+            END AS tipo_documento
+            
+        FROM base
+        ORDER BY base.fecha_carga DESC
         LIMIT {limit} OFFSET {offset}
         """
+        
+        # FILTRO POR TIPOS (si se proporciona)
+        # Aplicar DESPUÉS del CASE mediante subconsulta
+        if document_types and len(document_types) > 0:
+            # Crear lista de placeholders para IN clause
+            placeholders = ','.join(['%s'] * len(document_types))
+            query = f"""
+            SELECT * FROM (
+                {query}
+            ) AS classified
+            WHERE tipo_documento IN ({placeholders})
+            """
+            params_list.extend(document_types)
         
         # Convert to tuple
         params = tuple(params_list) if params_list else None
@@ -208,48 +281,128 @@ class RedshiftService:
         return result
     
     def get_document_by_codigo(self, codigo_proforma: str) -> Optional[Dict[str, Any]]:
-        """Obtiene un documento específico por código de proforma"""
+        """Obtiene un documento específico por código de proforma con clasificación homologada"""
         query = """
-        SELECT 
-            a.codigo_proforma,
-            pu.documento_cliente,
-            c.nombres || ' ' || c.apellidos AS nombre_cliente,
-            pu.codigo_proyecto,
-            pu.codigo_unidad,
+        WITH base AS (
+            SELECT
+                a.codigo_proforma,
+                pu.documento_cliente,
+                c.nombres || ' ' || c.apellidos AS nombre_cliente,
+                pu.codigo_proyecto,
+                pu.codigo_unidad,
+                CASE
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%departamento%%' THEN 'DPTO'
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%estacionamiento%%' THEN 'EST'
+                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%depósito%%' OR 
+                         LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%deposito%%' THEN 'DEP'
+                    ELSE 'OTRO'
+                END AS tipo_unidad,
+                a.url,
+                a.nombre as nombre_archivo,
+                a.montaje,
+                TO_CHAR(a.fecha_carga, 'YYYY-MM-DD HH24:MI:SS') as fecha_carga,
+                
+                /* Normalización 1 sola vez */
+                TRIM(
+                    REGEXP_REPLACE(
+                        TRANSLATE(
+                            LOWER(COALESCE(a.nombre,'') || ' ' || COALESCE(a.montaje,'')),
+                            'áéíóúüñ',
+                            'aeiouun'
+                        ),
+                        '[^a-z0-9]+',
+                        ' '
+                    )
+                ) AS txt
+                
+            FROM tale.archivos a
+            INNER JOIN tale.proforma_unidad pu ON a.codigo_proforma = pu.codigo_proforma
+            LEFT JOIN tale.clientes c ON pu.documento_cliente = c.documento
+            WHERE a.codigo_proforma = %s
+        )
+        SELECT
+            base.codigo_proforma,
+            base.documento_cliente,
+            base.nombre_cliente,
+            base.codigo_proyecto,
+            base.codigo_unidad,
+            base.tipo_unidad,
+            base.url,
+            base.nombre_archivo,
+            base.montaje,
+            base.fecha_carga,
+            
             CASE
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%departamento%%' THEN 'DPTO'
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%estacionamiento%%' THEN 'EST'
-                WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%depósito%%' OR 
-                     LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%deposito%%' THEN 'DEP'
-                ELSE 'OTRO'
-            END AS tipo_unidad,
-            a.url,
-            a.nombre as nombre_archivo,
-            a.montaje,
-            TO_CHAR(a.fecha_carga, 'YYYY-MM-DD HH24:MI:SS') as fecha_carga,
-            CASE 
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%voucher%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%constancia%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%transf%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%vou%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%pago%%' OR
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%sep%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%voucher%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%pago%%' THEN 'Voucher'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%minuta%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%minuta%%' THEN 'Minuta'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%adenda%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%adenda%%' THEN 'Adenda'
-                WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%%carta%%' OR 
-                     LOWER(COALESCE(a.nombre, '')) LIKE '%%aprobac%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%carta%%' OR
-                     LOWER(COALESCE(a.montaje, '')) LIKE '%%aprobac%%' THEN 'Carta de Aprobación'
+                /* A) CORTAFUEGOS */
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )(contrato|cont)( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                THEN 'Otro'
+                
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )(cronograma|crono)( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
+                THEN 'Otro'
+                
+                /* 1) MINUTA */
+                WHEN
+                    STRPOS(txt, 'minuta') > 0
+                    OR STRPOS(txt, 'preminuta') > 0
+                    OR STRPOS(txt, 'pre minuta') > 0
+                THEN 'Minuta'
+                
+                /* 2) ADENDA */
+                WHEN
+                    STRPOS(txt, 'adenda') > 0
+                    OR STRPOS(txt, 'addenda') > 0
+                    OR STRPOS(txt, 'addendum') > 0
+                    OR STRPOS(txt, 'enmienda') > 0
+                    OR STRPOS(txt, 'prorroga') > 0
+                    OR STRPOS(txt, 'ampliacion') > 0
+                    OR STRPOS(txt, 'modificac') > 0
+                    OR STRPOS(txt, 'renuncia hipoteca') > 0
+                THEN 'Adenda'
+                
+                /* 3) CARTA DE APROBACIÓN */
+                WHEN
+                    (
+                        STRPOS(txt, 'carta') > 0
+                        AND REGEXP_INSTR(
+                            txt,
+                            '(^| )(aprob|preaprob|preacept|precal|credito|autoriz|conformidad|validac|approval|banco|bcp|ibk|interbank|bbva|scotia)( |$)'
+                        ) > 0
+                    )
+                    OR REGEXP_INSTR(txt, '(^| )aprobacion( |$)') > 0
+                    OR REGEXP_INSTR(txt, '(^| )aprobacion( |$).*(gerencia|banco)( |$)') > 0
+                    OR REGEXP_INSTR(txt, '(^| )correo( |$).*aprob') > 0
+                THEN 'Carta de Aprobación'
+                
+                /* 4) VOUCHER (señales fuertes) */
+                WHEN
+                    STRPOS(txt, 'voucher') > 0
+                    OR STRPOS(txt, 'vaucher') > 0
+                    OR REGEXP_INSTR(txt, '(^| )vou( |$)') > 0
+                    OR STRPOS(txt, 'comprobante') > 0
+                    OR STRPOS(txt, 'recibo') > 0
+                    OR STRPOS(txt, 'transfer') > 0
+                    OR STRPOS(txt, 'transf') > 0
+                    OR STRPOS(txt, 'deposit') > 0
+                    OR STRPOS(txt, 'operacion') > 0
+                    OR STRPOS(txt, 'interbanc') > 0
+                    OR (
+                        STRPOS(txt, 'constancia') > 0
+                        AND REGEXP_INSTR(txt, '(^| )(transfer|transf|pago|abono|deposit|operacion)( |$)') > 0
+                    )
+                THEN 'Voucher'
+                
+                /* 5) VOUCHER (señal débil) */
+                WHEN REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
+                THEN 'Voucher'
+                
                 ELSE 'Otro'
-            END as tipo_documento
-        FROM tale.archivos a
-        INNER JOIN tale.proforma_unidad pu ON a.codigo_proforma = pu.codigo_proforma
-        LEFT JOIN tale.clientes c ON pu.documento_cliente = c.documento
-        WHERE a.codigo_proforma = %s
+            END AS tipo_documento
+            
+        FROM base
         LIMIT 1
         """
         results = self.execute_query(query, (codigo_proforma,))

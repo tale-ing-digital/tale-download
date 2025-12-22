@@ -4,6 +4,9 @@ Aplicación principal FastAPI para TaleDownload
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
+from pathlib import Path
 from backend.api.routes import router
 from backend.core.config import settings
 
@@ -25,6 +28,11 @@ app.add_middleware(
 )
 
 app.include_router(router)
+
+# Servir archivos estáticos del frontend
+public_dir = Path(__file__).parent.parent / "public"
+if public_dir.exists():
+    app.mount("/", StaticFiles(directory=str(public_dir), html=True), name="static")
 
 @app.on_event("startup")
 async def startup_event():

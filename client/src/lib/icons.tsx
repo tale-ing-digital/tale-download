@@ -13,7 +13,12 @@ import {
   List,
   MoreHorizontal,
   Package,
-  Calendar
+  Calendar,
+  FileText as FileText2,
+  CheckCircle,
+  ClipboardList,
+  Bell,
+  HelpCircle
 } from "lucide-react"
 
 export const Icons = {
@@ -43,6 +48,12 @@ export const PackageIcon = Package;
 export const CalendarIcon = Calendar;
 export const AlertIcon = AlertCircle;
 export const FilterIcon = Filter;
+export const XIcon = X;
+export const FileText2Icon = FileText2;
+export const CheckCircleIcon = CheckCircle;
+export const ClipboardIcon = ClipboardList;
+export const BellIcon = Bell;
+export const HelpCircleIcon = HelpCircle;
 
 // Configuración global de estilo para iconos
 // Stroke width: 1.5px para estilo "lineal fino"

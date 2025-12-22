@@ -147,9 +147,23 @@ El frontend estará disponible en: `http://localhost:3000`
 
 ## 📚 Documentación
 
-- **Backend API**: Ver `BACKEND_DOCUMENTATION.md`
+### API y Arquitectura
 - **Swagger UI**: `http://localhost:8080/api/docs` (cuando el backend esté ejecutándose)
 - **ReDoc**: `http://localhost:8080/api/redoc`
+
+### Documentación Técnica
+Toda la documentación técnica está organizada en la carpeta [`docs/`](./docs/):
+
+- 📋 **[Implementación de Filtros](./docs/IMPLEMENTACION_FILTROS_Y_CLASIFICACION.md)** - Sistema de filtros y clasificación de documentos
+- 🚀 **[Guía de Despliegue](./docs/DESPLIEGUE.md)** - Instrucciones completas para deployment
+- 🔧 **[Fixes Aplicados](./docs/FIX_CTE_ERROR_500.md)** - Soluciones a errores conocidos
+- 📊 **[Mejora de Clasificación](./docs/MEJORA_CLASIFICACION_DOCUMENTOS.md)** - Sistema de cortafuegos para clasificación
+- 📖 **[Reporte Backend](./docs/BACKEND_FINAL_REPORT.md)** - Documentación completa del backend
+- 📝 **[Análisis de Documentos](./docs/ANALISIS_DOCUMENTOS.md)** - Análisis de tipos documentales
+- ✅ **[Correcciones Completadas](./docs/CORRECION_COMPLETADA.md)** - Historial de correcciones
+- 📋 **[Resumen de Cambios](./docs/CAMBIOS_RESUMO.md)** - Changelog
+- 💡 **[Ideas](./docs/ideas.md)** - Ideas para futuras mejoras
+- ☑️ **[Todo](./docs/todo.md)** - Lista de tareas pendientes
 
 ## 🔌 Endpoints Principales
 

@@ -125,7 +125,7 @@ async def get_projects():
 @router.get("/documents", response_model=DocumentListResponse)
 async def get_documents(
     project_code: Optional[str] = None,
-    document_type: Optional[str] = None,
+    document_types: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 25,
@@ -133,14 +133,14 @@ async def get_documents(
 ):
     """Obtiene lista de documentos con filtros opcionales y paginación"""
     try:
-        # Convertir singular document_type a plural document_types
-        document_types = None
-        if document_type:
-            document_types = [document_type]
+        # Convertir CSV a lista
+        doc_type_list = None
+        if document_types:
+            doc_type_list = [t.strip() for t in document_types.split(',') if t.strip()]
         
         documents_data = redshift_service.get_documents(
             project_code=project_code,
-            document_types=document_types,
+            document_types=doc_type_list,
             start_date=start_date,
             end_date=end_date,
             limit=limit,

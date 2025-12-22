@@ -45,6 +45,27 @@ export interface ProjectListResponse {
   projects: ProjectSummary[];
 }
 
+export interface Project {
+  codigo_proyecto: string;
+  nombre_proyecto: string;
+  total_documentos?: number;
+  ultima_fecha_carga?: string;
+}
+
+export interface ProjectsResponse {
+  total: number;
+  projects: Project[];
+}
+
+export interface DocumentType {
+  tipo_documento: string;
+}
+
+export interface DocumentTypesResponse {
+  total: number;
+  types: DocumentType[];
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -53,7 +74,7 @@ export interface HealthResponse {
 
 export interface DocumentFilters {
   project_code?: string;
-  document_type?: string;
+  document_types?: string; // CSV separado por coma
   start_date?: string;
   end_date?: string;
   limit?: number;
@@ -87,9 +108,26 @@ export async function getProjectOptions(): Promise<string[]> {
   return response.data.options;
 }
 
+export async function getProjectsList(): Promise<ProjectsResponse> {
+  const response = await apiClient.get<ProjectsResponse>('/projects/all');
+  return response.data;
+}
+
+export async function getProjectOptionsSearch(query: string, limit: number = 50): Promise<string[]> {
+  const response = await apiClient.get<{ options: string[] }>('/filters/projects', {
+    params: { q: query, limit },
+  });
+  return response.data.options;
+}
+
 export async function getDocumentTypeOptions(): Promise<string[]> {
   const response = await apiClient.get<{ options: string[] }>('/filters/document-types');
   return response.data.options;
+}
+
+export async function getDocumentTypesList(): Promise<DocumentTypesResponse> {
+  const response = await apiClient.get<DocumentTypesResponse>('/document-types/all');
+  return response.data;
 }
 
 export async function getDocuments(filters?: DocumentFilters): Promise<DocumentListResponse> {
@@ -128,6 +166,7 @@ export async function downloadDocument(codigoProforma: string): Promise<void> {
 export async function downloadZip(request: DownloadZipRequest): Promise<void> {
   const response = await apiClient.post('/download/zip', request, {
     responseType: 'blob',
+    timeout: 300000, // 5 minutos para archivos grandes
   });
   
   const contentDisposition = response.headers['content-disposition'];
@@ -151,20 +190,22 @@ export async function downloadZip(request: DownloadZipRequest): Promise<void> {
   window.URL.revokeObjectURL(url);
 }
 
-export async function downloadProjectZip(projectCode: string): Promise<void> {
-  const response = await apiClient.get(`/download/zip/project/${projectCode}`, {
+export async function downloadProjectZip(projectCode: string, queryString?: string): Promise<void> {
+  const url = `/download/zip/project/${projectCode}${queryString ? queryString : ''}`;
+  const response = await apiClient.get(url, {
     responseType: 'blob',
+    timeout: 300000, // 5 minutos para archivos grandes
   });
   
   const blob = new Blob([response.data], { type: 'application/zip' });
-  const url = window.URL.createObjectURL(blob);
+  const urlObj = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = url;
+  link.href = urlObj;
   link.download = `${projectCode}.zip`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
+  window.URL.revokeObjectURL(urlObj);
 }
 
 export function handleApiError(error: unknown): string {

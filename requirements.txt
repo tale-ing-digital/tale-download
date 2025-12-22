@@ -1,0 +1,17 @@
+# Backend Dependencies for TaleDownload
+# FastAPI and server
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+
+# Database
+psycopg2-binary==2.9.10
+
+# PDF and Image processing
+Pillow==11.0.0
+reportlab==4.2.5
+
+# HTTP requests
+requests==2.32.3
+
+# Environment variables
+python-dotenv==1.0.1

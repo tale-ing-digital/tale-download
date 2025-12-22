@@ -18,11 +18,11 @@ COPY client ./client
 COPY shared ./shared
 COPY tsconfig.json ./
 COPY vite.config.ts ./
-COPY tailwind.config.ts ./
-COPY postcss.config.js ./
+COPY server ./server
+COPY tsconfig.node.json ./
 
 # Build frontend
-RUN pnpm build
+RUN pnpm install && pnpm run build
 
 # ============================================================================
 # STAGE 2: Production Runtime
@@ -48,7 +48,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 
 # Copy built frontend from previous stage
-COPY --from=frontend-builder /app/dist/public ./dist/public
+COPY --from=frontend-builder /app/dist/public ./public
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

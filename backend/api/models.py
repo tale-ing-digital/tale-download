@@ -6,20 +6,32 @@ from typing import Optional, List
 
 class DocumentModel(BaseModel):
     """Modelo de documento"""
-    codigo_proforma: str
-    documento_cliente: str
+    codigo_proforma: Optional[str] = None
+    documento_cliente: Optional[str] = None
+    codigo_proyecto: Optional[str] = None
+    codigo_unidad: Optional[str] = None
+    url: Optional[str] = None
+    nombre_archivo: Optional[str] = None
+    fecha_carga: Optional[str] = None
+    tipo_documento: Optional[str] = None
+
+class ProjectModel(BaseModel):
+    """Modelo de proyecto (DIM)"""
     codigo_proyecto: str
-    codigo_unidad: str
-    url: str
-    nombre_archivo: str
-    fecha_carga: str
-    tipo_documento: str
+    nombre_proyecto: str
+    total_documentos: Optional[int] = None
+    ultima_fecha_carga: Optional[str] = None
 
 class ProjectSummaryModel(BaseModel):
     """Modelo de resumen de proyecto"""
     codigo_proyecto: str
     total_documentos: int
     ultima_actualizacion: str
+
+class DocumentTypeModel(BaseModel):
+    """Modelo de tipo de documento homologado"""
+    tipo_documento: str
+    descripcion: Optional[str] = None
 
 class DocumentListResponse(BaseModel):
     """Respuesta de lista de documentos"""
@@ -30,6 +42,16 @@ class ProjectListResponse(BaseModel):
     """Respuesta de lista de proyectos"""
     total: int
     projects: List[ProjectSummaryModel]
+
+class ProjectsResponse(BaseModel):
+    """Respuesta de proyectos (con nombres)"""
+    total: int
+    projects: List[ProjectModel]
+
+class DocumentTypesResponse(BaseModel):
+    """Respuesta de tipos de documento"""
+    total: int
+    types: List[DocumentTypeModel]
 
 class HealthResponse(BaseModel):
     """Respuesta de health check"""
