@@ -9,6 +9,10 @@ import os
 from pathlib import Path
 from backend.api.routes import router
 from backend.core.config import settings
+from backend.core.logging_config import setup_logging
+
+# Configurar logging
+logger = setup_logging(debug=settings.DEBUG)
 
 app = FastAPI(
     title="TaleDownload API",
@@ -37,36 +41,42 @@ if public_dir.exists():
 @app.on_event("startup")
 async def startup_event():
     """Evento de inicio de la aplicación"""
-    print("=" * 80)
-    print("🚀 TaleDownload Backend Starting...")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("🚀 TaleDownload Backend Starting...")
+    logger.info("=" * 80)
     
     try:
         settings.validate()
-        print("✅ Environment variables validated")
+        logger.info("✅ Environment variables validated")
     except ValueError as e:
-        print(f"❌ Configuration error: {e}")
-        print("⚠️  Backend will start but may not function correctly")
+        logger.error(f"❌ Configuration error: {e}")
+        logger.warning("⚠️  Backend will start but may not function correctly")
     
-    print(f"📊 Version: {settings.VERSION}")
-    print(f"🔧 Debug mode: {settings.DEBUG}")
-    print(f"📁 Max file size: {settings.MAX_FILE_SIZE_MB}MB")
-    print("=" * 80)
+    logger.info(f"📊 Version: {settings.VERSION}")
+    logger.info(f"🔧 Debug mode: {settings.DEBUG}")
+    logger.info(f"📁 Max file size: {settings.MAX_FILE_SIZE_MB}MB")
+    logger.info("=" * 80)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Evento de cierre de la aplicación"""
-    print("=" * 80)
-    print("🛑 TaleDownload Backend Shutting Down...")
-    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("🛑 TaleDownload Backend Shutting Down...")
+    logger.info("=" * 80)
     
     from backend.services.redshift_service import redshift_service
     redshift_service.close()
 
 if __name__ == "__main__":
+    # Determinar número de workers basado en modo debug
+    # En debug: 1 worker (para desarrollo)
+    # En producción: 4 workers (para concurrencia)
+    workers = 1 if settings.DEBUG else 4
+    
     uvicorn.run(
         "backend.main:app",
         host="0.0.0.0",
         port=8080,
+        workers=workers,
         reload=settings.DEBUG
     )

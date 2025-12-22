@@ -1,10 +1,11 @@
 """
 Servicio de generación de ZIPs en streaming con estructura TALE
-IMPLEMENTACIÓN CONGELADA - NO MODIFICAR SIN APROBACIÓN
+Incluye logging estructurado para diagnóstico de errores
 """
 import io
 import zipfile
 import logging
+import time
 from typing import List, Dict, Any, Tuple
 from collections import defaultdict
 from datetime import datetime
@@ -152,6 +153,7 @@ Soporte: soporte@taleinmobiliaria.com
         processed_count = 0
         total_docs = len(documents)
         
+        start_time = time.time()
         logger.info(f"[ZIP] Starting ZIP generation: Project={project_code or 'UNKNOWN'}, Total Docs={total_docs}")
         
         # Agrupar documentos por carpeta
@@ -223,7 +225,8 @@ Soporte: soporte@taleinmobiliaria.com
         zip_buffer.seek(0)
         
         success_count = total_docs - len(failed_files)
-        logger.info(f"[ZIP] Completed: {success_count}/{total_docs} successful, {len(failed_files)} failed")
+        elapsed_time = time.time() - start_time
+        logger.info(f"[ZIP] Completed: {success_count}/{total_docs} successful, {len(failed_files)} failed in {elapsed_time:.2f}s")
         
         return zip_buffer
 

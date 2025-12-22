@@ -63,5 +63,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8080/api/health', timeout=5)"
 
-# Run application
-CMD ["python", "-m", "backend.main"]
+# Run application with optimized workers
+# En contenedor, ejecutar con 4 workers para mejor concurrencia
+CMD ["python", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "4"]
