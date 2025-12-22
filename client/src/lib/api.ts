@@ -166,7 +166,13 @@ export async function downloadDocument(codigoProforma: string): Promise<void> {
 export async function downloadZip(request: DownloadZipRequest): Promise<void> {
   const response = await apiClient.post('/download/zip', request, {
     responseType: 'blob',
-    timeout: 300000, // 5 minutos para archivos grandes
+    timeout: 0, // Sin timeout - necesario para archivos muy grandes
+    onDownloadProgress: (progressEvent) => {
+      if (progressEvent.total) {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        console.log(`Download progress: ${percentCompleted}%`);
+      }
+    }
   });
   
   const contentDisposition = response.headers['content-disposition'];
@@ -194,7 +200,13 @@ export async function downloadProjectZip(projectCode: string, queryString?: stri
   const url = `/download/zip/project/${projectCode}${queryString ? queryString : ''}`;
   const response = await apiClient.get(url, {
     responseType: 'blob',
-    timeout: 300000, // 5 minutos para archivos grandes
+    timeout: 0, // Sin timeout - necesario para proyectos con muchos archivos grandes
+    onDownloadProgress: (progressEvent) => {
+      if (progressEvent.total) {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        console.log(`Download progress: ${percentCompleted}%`);
+      }
+    }
   });
   
   const blob = new Blob([response.data], { type: 'application/zip' });

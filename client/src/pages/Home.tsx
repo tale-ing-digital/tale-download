@@ -96,7 +96,7 @@ export default function Home() {
 
   const handleDownloadProjectZip = async (projectCode: string) => {
     setDownloading(projectCode);
-    const toastId = toast.loading(`Generando ZIP del proyecto ${projectCode}...`);
+    const toastId = toast.loading(`Generando ZIP del proyecto ${projectCode}... Esto puede tardar varios minutos dependiendo del tamaño.`);
     try {
       // Construir query params CON los filtros APLICADOS
       const params = new URLSearchParams();
