@@ -21,8 +21,10 @@ const apiClient: AxiosInstance = axios.create({
 export interface Document {
   codigo_proforma: string;
   documento_cliente: string;
+  nombre_cliente?: string;
   codigo_proyecto: string;
   codigo_unidad: string;
+  tipo_unidad?: TipoUnidadCode; // Código homologado: DPTO, EST, DEP, LC, GAB, SIN_DATA, OTRO
   url: string;
   nombre_archivo: string;
   fecha_carga: string;
@@ -65,6 +67,46 @@ export interface DocumentTypesResponse {
   total: number;
   types: DocumentType[];
 }
+
+// ============================================================================
+// TIPOS DE UNIDAD HOMOLOGADOS
+// ============================================================================
+
+/**
+ * Códigos canónicos de tipo de unidad
+ * Prioridad de match: LC > DPTO > EST > DEP > GAB > OTRO
+ */
+export type TipoUnidadCode = 'DPTO' | 'EST' | 'DEP' | 'LC' | 'GAB' | 'SIN_DATA' | 'OTRO';
+
+export interface TipoUnidad {
+  codigo: TipoUnidadCode;
+  label: string;
+}
+
+export interface TipoUnidadResponse {
+  total: number;
+  tipos: TipoUnidad[];
+}
+
+/** Labels amigables para UI (fallback client-side) */
+export const TIPO_UNIDAD_LABELS: Record<TipoUnidadCode, string> = {
+  DPTO: 'Departamento',
+  EST: 'Estacionamiento',
+  DEP: 'Depósito',
+  LC: 'Local Comercial',
+  GAB: 'Gabinete',
+  SIN_DATA: 'Sin Datos',
+  OTRO: 'Otro',
+};
+
+/** Tipos de unidad principales (para filtros UI) */
+export const MAIN_UNIT_TYPES: TipoUnidad[] = [
+  { codigo: 'DPTO', label: 'Departamento' },
+  { codigo: 'EST', label: 'Estacionamiento' },
+  { codigo: 'DEP', label: 'Depósito' },
+  { codigo: 'LC', label: 'Local Comercial' },
+  { codigo: 'GAB', label: 'Gabinete' },
+];
 
 export interface HealthResponse {
   status: string;
@@ -127,6 +169,11 @@ export async function getDocumentTypeOptions(): Promise<string[]> {
 
 export async function getDocumentTypesList(): Promise<DocumentTypesResponse> {
   const response = await apiClient.get<DocumentTypesResponse>('/document-types/all');
+  return response.data;
+}
+
+export async function getUnitTypesList(): Promise<TipoUnidadResponse> {
+  const response = await apiClient.get<TipoUnidadResponse>('/unit-types/all');
   return response.data;
 }
 

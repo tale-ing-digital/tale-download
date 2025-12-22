@@ -39,50 +39,133 @@ def sanitize_folder_name(name: str) -> str:
     name = re.sub(r'\s+', ' ', name).strip()
     return name
 
+"""
+HOMOLOGACIÓN CANÓNICA DE TIPO DE UNIDAD
+=======================================
+Códigos oficiales con prioridad de match: LC > DPTO > EST > DEP > GAB > OTRO
+
+- DPTO: cualquier tipo que contenga "departamento" (incluye duplex, loft, etc.)
+- EST: cualquier tipo que contenga "estacionamiento" (incluye moto, doble, "con depósito", etc.)
+- DEP: "depósito/deposito" SOLO cuando NO es estacionamiento
+- LC: "local comercial"
+- GAB: "gabinete"
+- SIN_DATA: cuando tipo_unidad venga NULL o vacío
+- OTRO: cualquier valor que no matchee con las reglas anteriores
+"""
+
+# Códigos canónicos de tipo de unidad
+TIPO_UNIDAD_CODES = {
+    'DPTO': 'Departamento',
+    'EST': 'Estacionamiento',
+    'DEP': 'Depósito',
+    'LC': 'Local Comercial',
+    'GAB': 'Gabinete',
+    'SIN_DATA': 'Sin Datos',
+    'OTRO': 'Otro',
+}
+
+# Backward compatibility: mapeo de códigos antiguos a canónicos
+TIPO_UNIDAD_LEGACY_MAP = {
+    'LOC': 'LC',        # LOC → LC (Local Comercial)
+    'LOCAL': 'LC',      # LOCAL → LC
+    'ESTAC': 'EST',     # ESTAC → EST
+    'OFIC': 'LC',       # Oficina → Local Comercial (aproximación)
+    'TIENDA': 'LC',     # Tienda → Local Comercial
+    'UNIDAD': 'OTRO',   # Genérico → Otro
+}
+
+
+def homologar_tipo_unidad(tipo_unidad_raw: str) -> str:
+    """
+    Homologa un tipo de unidad raw al código canónico.
+    
+    PRIORIDAD DE MATCH: LC > DPTO > EST > DEP > GAB > OTRO
+    
+    Ejemplo crítico:
+        "estacionamiento con depósito" => EST (NO DEP)
+    
+    Args:
+        tipo_unidad_raw: Valor raw desde la BD o código ya homologado
+    
+    Returns:
+        Código canónico (DPTO, EST, DEP, LC, GAB, SIN_DATA, OTRO)
+    """
+    if not tipo_unidad_raw or not tipo_unidad_raw.strip():
+        return 'SIN_DATA'
+    
+    tipo_lower = tipo_unidad_raw.lower().strip()
+    
+    # Si ya es un código canónico, devolverlo normalizado
+    tipo_upper = tipo_unidad_raw.upper().strip()
+    if tipo_upper in TIPO_UNIDAD_CODES:
+        return tipo_upper
+    
+    # Backward compatibility: códigos legacy
+    if tipo_upper in TIPO_UNIDAD_LEGACY_MAP:
+        return TIPO_UNIDAD_LEGACY_MAP[tipo_upper]
+    
+    # Aplicar reglas de homologación con PRIORIDAD: LC > DPTO > EST > DEP > GAB > OTRO
+    if 'local comercial' in tipo_lower:
+        return 'LC'
+    if 'departamento' in tipo_lower:
+        return 'DPTO'
+    if 'estacionamiento' in tipo_lower:
+        return 'EST'
+    if 'depósito' in tipo_lower or 'deposito' in tipo_lower:
+        return 'DEP'
+    if 'gabinete' in tipo_lower:
+        return 'GAB'
+    
+    return 'OTRO'
+
+
 def extract_tipo_unidad(codigo_unidad: str, tipo_unidad_db: str = None) -> str:
     """
-    Extrae el tipo de unidad del código de unidad o usa el de la BD
+    Extrae y homologa el tipo de unidad del código de unidad o usa el de la BD.
     
     Ejemplos:
-        DPTO-305 → DPTO
-        PAINO-E121 → E (Estacionamiento)
-        PAINO-1912 → DPTO (por defecto si no tiene prefijo claro)
+        "departamento" → DPTO
+        "departamento duplex" → DPTO
+        "estacionamiento con depósito" → EST (prioridad EST sobre DEP)
+        "local comercial" → LC
+        "gabinete" → GAB
+        NULL / '' → SIN_DATA
     
     Args:
         codigo_unidad: Código de unidad completo
         tipo_unidad_db: Tipo de unidad desde la base de datos (preferido)
     
     Returns:
-        Tipo de unidad homologado
+        Tipo de unidad homologado (código canónico)
     """
     # Priorizar tipo de unidad de la BD si existe
     if tipo_unidad_db and tipo_unidad_db.strip():
-        return sanitize_filename(tipo_unidad_db.strip())
+        return homologar_tipo_unidad(tipo_unidad_db)
     
     if not codigo_unidad:
-        return "UNIDAD"
+        return "SIN_DATA"
     
-    # Extraer parte antes del guión
+    # Fallback: extraer del código de unidad
     parts = codigo_unidad.split('-')
     if len(parts) < 2:
-        return "DPTO"  # Default
+        return "DPTO"  # Default para códigos simples
     
     prefix = parts[1][:1].upper()  # Primer carácter del sufijo
     
-    # Mapeo de tipos comunes
-    tipo_map = {
-        'E': 'ESTAC',
-        'D': 'DPTO',
-        'O': 'OFIC',
-        'T': 'TIENDA',
-        'L': 'LOCAL',
+    # Mapeo de prefijos comunes a códigos canónicos
+    prefix_map = {
+        'E': 'EST',     # E = Estacionamiento
+        'D': 'DPTO',    # D = Departamento
+        'L': 'LC',      # L = Local Comercial
+        'G': 'GAB',     # G = Gabinete
+        'P': 'DEP',     # P = depósito (a veces usan P)
     }
     
     # Si es número, es departamento
     if prefix.isdigit():
         return "DPTO"
     
-    return tipo_map.get(prefix, "DPTO")
+    return prefix_map.get(prefix, "DPTO")
 
 def generate_filename(doc: Dict[str, Any]) -> str:
     """

@@ -15,7 +15,11 @@ from backend.api.models import (
     DocumentModel,
     ProjectSummaryModel,
     ProjectModel,
-    DocumentTypeModel
+    DocumentTypeModel,
+    TipoUnidadModel,
+    TipoUnidadResponse,
+    TipoUnidadHomologado,
+    TIPO_UNIDAD_LABELS,
 )
 from backend.services.redshift_service import redshift_service
 from backend.services.download_service import download_service
@@ -84,6 +88,38 @@ async def get_all_document_types():
         return DocumentTypesResponse(total=0, types=[])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching document types: {str(e)}")
+
+
+@router.get("/unit-types/all", response_model=TipoUnidadResponse)
+async def get_all_unit_types():
+    """
+    Obtiene lista de tipos de unidad homologados (códigos canónicos).
+    
+    Códigos disponibles:
+    - DPTO: Departamento (incluye duplex, loft, etc.)
+    - EST: Estacionamiento (incluye moto, doble, con depósito, etc.)
+    - DEP: Depósito
+    - LC: Local Comercial
+    - GAB: Gabinete
+    
+    Nota: SIN_DATA y OTRO son solo para robustez, normalmente no aparecen.
+    """
+    # Solo exponer los tipos principales (excluir SIN_DATA y OTRO)
+    main_types = [
+        TipoUnidadHomologado.DPTO,
+        TipoUnidadHomologado.EST,
+        TipoUnidadHomologado.DEP,
+        TipoUnidadHomologado.LC,
+        TipoUnidadHomologado.GAB,
+    ]
+    
+    tipos = [
+        TipoUnidadModel(codigo=t.value, label=TIPO_UNIDAD_LABELS[t])
+        for t in main_types
+    ]
+    
+    return TipoUnidadResponse(total=len(tipos), tipos=tipos)
+
 
 @router.get("/filters/projects", response_model=FilterOptionsResponse)
 async def get_project_options(q: Optional[str] = None, limit: int = 50):

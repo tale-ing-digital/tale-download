@@ -290,11 +290,15 @@ class RedshiftService:
                 c.nombres || ' ' || c.apellidos AS nombre_cliente,
                 pu.codigo_proyecto,
                 pu.codigo_unidad,
+                /* HOMOLOGACIÓN CANÓNICA tipo_unidad - Prioridad: LC > DPTO > EST > DEP > GAB > OTRO */
                 CASE
-                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%departamento%%' THEN 'DPTO'
-                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%estacionamiento%%' THEN 'EST'
-                    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%depósito%%' OR 
-                         LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%%deposito%%' THEN 'DEP'
+                    WHEN pu.tipo_unidad IS NULL OR TRIM(pu.tipo_unidad) = '' THEN 'SIN_DATA'
+                    WHEN LOWER(pu.tipo_unidad) LIKE '%%local comercial%%' THEN 'LC'
+                    WHEN LOWER(pu.tipo_unidad) LIKE '%%departamento%%' THEN 'DPTO'
+                    WHEN LOWER(pu.tipo_unidad) LIKE '%%estacionamiento%%' THEN 'EST'
+                    WHEN LOWER(pu.tipo_unidad) LIKE '%%depósito%%' OR 
+                         LOWER(pu.tipo_unidad) LIKE '%%deposito%%' THEN 'DEP'
+                    WHEN LOWER(pu.tipo_unidad) LIKE '%%gabinete%%' THEN 'GAB'
                     ELSE 'OTRO'
                 END AS tipo_unidad,
                 a.url,

@@ -10,7 +10,7 @@ from collections import defaultdict
 from datetime import datetime
 from backend.services.download_service import download_service
 from backend.services.pdf_service import pdf_service
-from backend.utils.file_naming import generate_filename, generate_folder_path
+from backend.utils.file_naming import generate_filename, generate_folder_path, TIPO_UNIDAD_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +113,14 @@ ESTRUCTURA DEL ZIP:
 -------------------
 Cada carpeta representa una unidad vendida:
   {{TIPO_UNIDAD}}-{{CODIGO_UNIDAD}} - {{NOMBRE_CLIENTE}}/
+
+CÓDIGOS DE TIPO DE UNIDAD (Homologación Canónica):
+--------------------------------------------------
+• DPTO: Departamento (incluye duplex, loft, etc.)
+• EST:  Estacionamiento (incluye moto, doble, etc.)
+• DEP:  Depósito
+• LC:   Local Comercial
+• GAB:  Gabinete
 
 ARCHIVOS:
 ---------
