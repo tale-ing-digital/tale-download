@@ -7,6 +7,10 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from typing import Optional
 
+# Constantes para detectar extensiones de Office
+WORD_EXTENSIONS = {".doc", ".docx"}
+PASSTHROUGH_EXTENSIONS = {".xlsx", ".pptx"}
+
 class PDFService:
     """Servicio para conversión de archivos a PDF"""
     
@@ -23,6 +27,41 @@ class PDFService:
             return True
         except:
             return False
+    
+    @staticmethod
+    def get_file_extension_from_content(content: bytes) -> str:
+        """Detecta la extensión del archivo por sus magic bytes para mayor fiabilidad."""
+        if content.startswith(b'%PDF'):
+            return '.pdf'
+        
+        # Formatos de Office basados en ZIP (OOXML)
+        if content.startswith(b'PK\x03\x04'):
+            # El contenido de los archivos OOXML es un ZIP. Buscamos directorios específicos.
+            if b'word/' in content[:2000]:
+                return '.docx'
+            if b'xl/' in content[:2000]:
+                return '.xlsx'
+            if b'ppt/' in content[:2000]:
+                return '.pptx'
+        
+        # Formatos de Office antiguos (OLE CF)
+        if content.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
+            # Estos son más difíciles de diferenciar, pero podemos buscar strings comunes.
+            if b'WordDocument' in content[:2000]:
+                return '.doc'
+            # Nota: .xls y .ppt antiguos son más ambiguos y los omitimos por ahora para seguridad.
+
+        # Formatos de imagen
+        try:
+            with Image.open(io.BytesIO(content)) as img:
+                if img.format and img.format.lower() in ['jpeg', 'jpg']:
+                    return '.jpg'
+                if img.format and img.format.lower() == 'png':
+                    return '.png'
+        except IOError:
+            pass # No es una imagen que PIL pueda abrir
+
+        return '' # Extensión desconocida
     
     @staticmethod
     def image_to_pdf(image_bytes: bytes) -> Optional[bytes]:
@@ -79,26 +118,48 @@ class PDFService:
             return None
     
     @staticmethod
-    def convert_to_pdf(content: bytes) -> Optional[bytes]:
+    def convert_to_pdf(content: bytes, original_filename: str = None) -> Optional[dict]:
         """
-        Convierte contenido a PDF (si no lo es ya)
-        
+        Convierte contenido a PDF o indica que debe pasar sin cambios (passthrough).
+
         Args:
-            content: Bytes del archivo
-        
+            content: Bytes del archivo.
+            original_filename: Nombre original del archivo para usar como fallback.
+
         Returns:
-            Bytes del PDF
+            Un diccionario con {"mode", "content", "extension"} o None si falla.
         """
-        # Si ya es PDF, retornar directamente
-        if PDFService.is_pdf(content):
-            return content
-        
-        # Si es imagen, convertir a PDF
-        if PDFService.is_image(content):
-            return PDFService.image_to_pdf(content)
-        
-        # Formato no soportado
-        print("❌ Unsupported file format for PDF conversion")
+        # Primero, intentamos detectar la extensión por el contenido (magic bytes).
+        ext = PDFService.get_file_extension_from_content(content)
+
+        # Si no se detecta, usamos el nombre del archivo como segunda opción.
+        if not ext and original_filename:
+            file_parts = original_filename.lower().split(".")
+            if len(file_parts) > 1:
+                ext = f".{file_parts[-1]}"
+
+        # --- Lógica de decisión ---
+
+        # 1. Si ya es un PDF, es un passthrough de tipo PDF.
+        if ext == ".pdf":
+            return {"mode": "pdf", "content": content, "extension": ".pdf"}
+
+        # 2. Si es una extensión de Office que no convertimos, es passthrough.
+        if ext in PASSTHROUGH_EXTENSIONS:
+            return {"mode": "passthrough", "content": content, "extension": ext}
+
+        # 3. Si es Word, por ahora también es passthrough. En el futuro se convertirá.
+        if ext in WORD_EXTENSIONS:
+            return {"mode": "passthrough", "content": content, "extension": ext}
+
+        # 4. Si es una imagen, la convertimos a PDF.
+        if ext in [".jpg", ".png"]:
+            pdf_content = PDFService.image_to_pdf(content)
+            if pdf_content:
+                return {"mode": "pdf", "content": pdf_content, "extension": ".pdf"}
+
+        # 5. Si no es nada de lo anterior, es un formato no soportado.
+        print(f"❌ Formato de archivo no soportado con extensión detectada: '{ext}'")
         return None
 
 pdf_service = PDFService()

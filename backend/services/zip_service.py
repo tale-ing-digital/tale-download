@@ -183,30 +183,42 @@ Soporte: soporte@taleinmobiliaria.com
                     
                     try:
                         # Descargar archivo
-                        url = doc.get('url', '')
+                        url = doc.get("url", "")
                         if not url:
-                            raise ValueError("Missing URL")
-                        
+                            raise ValueError("Missing document URL")
+
                         content = download_service.download_file(url)
                         if not content:
-                            raise ValueError("Download failed")
+                            raise ValueError("Download failed or file is empty")
+
+                        # Extraer nombre original para fallback de extensión
+                        original_filename = url.split("/")[-1].split("?")[0]
+
+                        # Convertir o determinar el modo de manejo
+                        result = pdf_service.convert_to_pdf(content, original_filename)
+                        if not result:
+                            raise ValueError(f"Unsupported file type or processing failed for {original_filename}")
+
+                        # --- Lógica de ZIP según el modo ---
+                        file_content = result["content"]
+                        file_extension = result["extension"]
+                        folder_path_var = generate_folder_path(doc, project_code or "PROJECT")
+
+                        if result["mode"] == "pdf":
+                            # Modo PDF: se nombra y agrega como siempre.
+                            filename = generate_filename(doc)
+                            zip_path = f"{folder_path_var}/{filename}"
+                            zip_file.writestr(zip_path, file_content)
+                            logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | PDF | {zip_path}")
                         
-                        # Convertir a PDF
-                        pdf_content = pdf_service.convert_to_pdf(content)
-                        if not pdf_content:
-                            raise ValueError("PDF conversion failed")
-                        
-                        # Generar nombre de archivo
-                        filename = generate_filename(doc)
-                        
-                        # Ruta completa dentro del ZIP
-                        zip_path = f"{folder_path}/{filename}"
-                        
-                        # Agregar al ZIP
-                        zip_file.writestr(zip_path, pdf_content)
-                        
-                        logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | {tipo_doc} | {folder_path}/{filename}")
-                        
+                        elif result["mode"] == "passthrough":
+                            # Modo Passthrough: usamos el nombre TALE pero con la extensión original.
+                            filename_base = generate_filename(doc).rsplit(".", 1)[0]
+                            filename = f"{filename_base}{file_extension}"
+                            zip_path = f"{folder_path_var}/{filename}"
+                            zip_file.writestr(zip_path, file_content)
+                            logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | PASSTHROUGH | {zip_path}")
+
                     except Exception as e:
                         error_msg = f"{codigo_proforma} | {tipo_doc} | {str(e)}"
                         failed_files.append(error_msg)

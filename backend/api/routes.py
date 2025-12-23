@@ -192,31 +192,63 @@ async def get_documents(
 
 @router.get("/download/document/{codigo_proforma}")
 async def download_document(codigo_proforma: str):
-    """Descarga un documento individual como PDF"""
+    """Descarga un documento individual, ya sea convertido a PDF o en su formato original."""
     try:
         doc = redshift_service.get_document_by_codigo(codigo_proforma)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
-        
-        content = download_service.download_file(doc['url'])
+
+        content = download_service.download_file(doc["url"])
         if not content:
-            raise HTTPException(status_code=500, detail="Failed to download document")
+            raise HTTPException(status_code=500, detail="Failed to download document from URL")
+
+        # Extraemos el nombre original del archivo desde la URL para el fallback de extensión.
+        original_filename = doc["url"].split("/")[-1].split("?")[0] # Limpia query strings
+
+        # La función ahora devuelve un diccionario con el modo de manejo.
+        result = pdf_service.convert_to_pdf(content, original_filename)
+        if not result:
+            raise HTTPException(status_code=500, detail=f"Failed to process document: {original_filename}")
+
+        # --- Lógica de respuesta según el modo ---
+        file_content = result["content"]
+        file_extension = result["extension"]
+
+        if result["mode"] == "pdf":
+            # Modo PDF: se sirve como siempre, con el nombre de archivo generado por TALE.
+            filename = generate_filename(doc)
+            media_type = "application/pdf"
         
-        pdf_content = pdf_service.convert_to_pdf(content)
-        if not pdf_content:
-            raise HTTPException(status_code=500, detail="Failed to convert to PDF")
+        elif result["mode"] == "passthrough":
+            # Modo Passthrough: usamos el nombre de archivo TALE pero con la extensión original.
+            filename_base = generate_filename(doc).rsplit(".", 1)[0]
+            filename = f"{filename_base}{file_extension}"
+            
+            # Mapeo de Content-Type para archivos Office.
+            content_type_map = {
+                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ".doc": "application/msword",
+            }
+            media_type = content_type_map.get(file_extension, "application/octet-stream")
         
-        filename = generate_filename(doc)
-        
+        else:
+            raise HTTPException(status_code=500, detail="Unknown processing mode")
+
         return StreamingResponse(
-            iter([pdf_content]),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+            iter([file_content]),
+            media_type=media_type,
+            headers={"Content-Disposition": f"attachment; filename=\"{filename}\""}
         )
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading document: {str(e)}")
+        # Captura de error más detallada para debugging.
+        import traceback
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 @router.post("/download/zip")
 async def download_zip(request: DownloadZipRequest):
