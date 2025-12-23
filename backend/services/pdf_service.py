@@ -5,6 +5,7 @@ import io
 from PIL import Image
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import ImageReader
 from typing import Optional
 
 # Constantes para detectar extensiones de Office
@@ -114,7 +115,9 @@ class PDFService:
             with io.BytesIO() as temp_img_buffer:
                 image.save(temp_img_buffer, format="PNG")
                 temp_img_buffer.seek(0)
-                c.drawImage(temp_img_buffer, x, y, width=new_width, height=new_height)
+                # Usar ImageReader para que reportlab acepte BytesIO
+                img_reader = ImageReader(temp_img_buffer)
+                c.drawImage(img_reader, x, y, width=new_width, height=new_height)
             
             c.save()
             pdf_buffer.seek(0)

@@ -25,18 +25,20 @@ def sanitize_filename(name: str) -> str:
 
 def sanitize_folder_name(name: str) -> str:
     """
-    Sanitiza nombre de carpeta (permite espacios y guiones)
+    Sanitiza nombre de carpeta (permite espacios y guiones) y convierte a mayúsculas
     
     Args:
         name: Nombre original
     
     Returns:
-        Nombre sanitizado
+        Nombre sanitizado en mayúsculas
     """
     # Remover solo caracteres verdaderamente inválidos
     name = re.sub(r'[<>:"/\\|?*]', '', name)
     # Normalizar espacios múltiples
     name = re.sub(r'\s+', ' ', name).strip()
+    # Convertir a mayúsculas
+    name = name.upper()
     return name
 
 """
