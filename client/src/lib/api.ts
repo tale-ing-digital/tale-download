@@ -4,7 +4,11 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 // API CLIENT CONFIGURATION
 // ============================================================================
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+// Use VITE_API_URL when provided (development). In production default to '/api'
+// to keep all calls relative to the current origin and avoid hardcoded localhost.
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.MODE === 'production' ? '/api' : 'http://localhost:8080/api');
 
 const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
