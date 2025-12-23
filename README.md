@@ -62,13 +62,13 @@ podman rm tale-download || true
 # 5. Ejecutar contenedor
 podman run -d \
   --name tale-download \
-  -p 8080:8080 \
+  -p 8010:8010 \
   --env-file .env \
   tale-download
 
 # 6. Verificar
 podman logs -f tale-download
-curl http://localhost:8080/api/health
+curl http://localhost:8010/api/health
 ```
 
 ### Variables de Entorno Requeridas
@@ -92,13 +92,13 @@ MAX_FILE_SIZE_MB=500
 
 ```bash
 # Health check
-curl http://localhost:8080/api/health
+curl http://localhost:8010/api/health
 
 # Listar proyectos
-curl http://localhost:8080/api/projects
+curl http://localhost:8010/api/projects
 
 # Interfaz web
-open http://localhost:8080
+open http://localhost:8010
 ```
 
 ## 💻 Desarrollo Local
@@ -130,8 +130,8 @@ python -m backend.main
 ```
 
 El backend estará disponible en:
-- API: `http://localhost:8080/api`
-- Swagger UI: `http://localhost:8080/api/docs`
+- API: `http://localhost:8010/api`
+- Swagger UI: `http://localhost:8010/api/docs`
 
 ### 2. Frontend (React)
 
@@ -148,8 +148,8 @@ El frontend estará disponible en: `http://localhost:3000`
 ## 📚 Documentación
 
 ### API y Arquitectura
-- **Swagger UI**: `http://localhost:8080/api/docs` (cuando el backend esté ejecutándose)
-- **ReDoc**: `http://localhost:8080/api/redoc`
+- **Swagger UI**: `http://localhost:8010/api/docs` (cuando el backend esté ejecutándose)
+- **ReDoc**: `http://localhost:8010/api/redoc`
 
 ### Documentación Técnica
 Toda la documentación técnica está organizada en la carpeta [`docs/`](./docs/):
@@ -180,19 +180,19 @@ Toda la documentación técnica está organizada en la carpeta [`docs/`](./docs/
 
 ```bash
 # Health check
-curl http://localhost:8080/api/health
+curl http://localhost:8010/api/health
 
 # Listar proyectos
-curl http://localhost:8080/api/projects
+curl http://localhost:8010/api/projects
 
 # Listar documentos de un proyecto
-curl "http://localhost:8080/api/documents?project_code=PAINO"
+curl "http://localhost:8010/api/documents?project_code=PAINO"
 
 # Descargar documento individual
-curl "http://localhost:8080/api/download/document/2025-01061" --output documento.pdf
+curl "http://localhost:8010/api/download/document/2025-01061" --output documento.pdf
 
 # Descargar ZIP de proyecto
-curl "http://localhost:8080/api/download/zip/project/PAINO" --output PAINO.zip
+curl "http://localhost:8010/api/download/zip/project/PAINO" --output PAINO.zip
 ```
 
 ## ⚙️ Configuración

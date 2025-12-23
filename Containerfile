@@ -57,11 +57,11 @@ RUN useradd -m -u 1000 appuser && \
 USER appuser
 
 # Expose port
-EXPOSE 8080
+EXPOSE 8010
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8080/api/health', timeout=5)"
+    CMD python -c "import requests; requests.get('http://localhost:8010/api/health', timeout=5)"
 
 # Run application
 CMD ["python", "-m", "backend.main"]
