@@ -5,9 +5,10 @@ IMPLEMENTACIÓN CONGELADA - NO MODIFICAR SIN APROBACIÓN
 import io
 import zipfile
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 from datetime import datetime
+import concurrent.futures
 from backend.services.download_service import download_service
 from backend.services.pdf_service import pdf_service
 from backend.utils.file_naming import generate_filename, generate_folder_path, TIPO_UNIDAD_CODES
@@ -144,86 +145,102 @@ Soporte: soporte@taleinmobiliaria.com
         logger.info("[ZIP] Added _00_INFO_TALE folder")
     
     @staticmethod
+    def _download_and_process_file(doc: Dict[str, Any], project_code: str) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
+        """
+        Función de trabajo para un solo archivo: descarga, procesa y retorna el resultado.
+        Diseñada para ser ejecutada en un thread pool.
+        Retorna (zip_path, content, error_message).
+        """
+        codigo_proforma = doc.get("codigo_proforma", "UNKNOWN")
+        tipo_doc = doc.get("tipo_documento", "Otro")
+        
+        try:
+            url = doc.get("url", "")
+            if not url:
+                raise ValueError("Missing document URL")
+
+            content = download_service.download_file(url)
+            if not content:
+                raise ValueError("Download failed or file is empty")
+
+            original_filename = url.split("/")[-1].split("?")[0]
+            result = pdf_service.convert_to_pdf(content, original_filename)
+            if not result:
+                raise ValueError(f"Unsupported file type for {original_filename}")
+
+            file_content = result["content"]
+            file_extension = result["extension"]
+            folder_path = generate_folder_path(doc, project_code or "PROJECT")
+
+            if result["mode"] == "pdf":
+                filename = generate_filename(doc)
+            else: # passthrough
+                filename_base = generate_filename(doc).rsplit(".", 1)[0]
+                filename = f"{filename_base}{file_extension}"
+            
+            zip_path = f"{folder_path}/{filename}"
+            return (zip_path, file_content, None)
+
+        except Exception as e:
+            error_msg = f"{codigo_proforma} | {tipo_doc} | {str(e)}"
+            return (None, None, error_msg)
+    
+    @staticmethod
     def create_zip(documents: List[Dict[str, Any]], project_code: str = None) -> io.BytesIO:
-        """
-        Crea un ZIP en streaming con documentos organizados según estructura TALE
-        
-        Args:
-            documents: Lista de documentos con metadata de BI
-            project_code: Código del proyecto (para logs y contexto)
-        
-        Returns:
-            BytesIO con el contenido del ZIP listo para streaming
-        """
+        """Crea un ZIP en streaming con descarga y procesamiento paralelo."""
         zip_buffer = io.BytesIO()
         failed_files = []
-        processed_count = 0
         total_docs = len(documents)
         
-        logger.info(f"[ZIP] Starting ZIP generation: Project={project_code or 'UNKNOWN'}, Total Docs={total_docs}")
+        # Usar máximo 10 workers para no saturar el sistema (rango seguro)
+        MAX_WORKERS = min(10, total_docs) if total_docs > 0 else 1
+
+        logger.info(f"[ZIP] Starting parallel ZIP generation: Project={project_code or 'UNKNOWN'}, Total Docs={total_docs}, Workers={MAX_WORKERS}")
         
         # Agrupar documentos por carpeta
         grouped_docs = ZipService._group_documents_by_folder(documents, project_code or 'PROJECT')
         logger.info(f"[ZIP] Grouped into {len(grouped_docs)} folders")
         
+        # Procesar todos los documentos en paralelo
+        processed_results = []
+        processed_count = 0
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Crear lista de futures
+            futures = {
+                executor.submit(ZipService._download_and_process_file, doc, project_code or 'PROJECT'): doc
+                for doc in documents
+            }
+            
+            # Procesar resultados conforme van terminando
+            for future in concurrent.futures.as_completed(futures):
+                processed_count += 1
+                doc = futures[future]
+                tipo_doc = doc.get("tipo_documento", "Otro")
+                
+                try:
+                    zip_path, content, error_msg = future.result()
+                    
+                    if error_msg:
+                        failed_files.append(error_msg)
+                        logger.warning(f"[ZIP] ✗ {processed_count}/{total_docs} | FAILED: {error_msg}")
+                    else:
+                        processed_results.append((zip_path, content))
+                        logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | {tipo_doc} | {zip_path}")
+                
+                except Exception as e:
+                    error_msg = f"{doc.get('codigo_proforma', 'UNKNOWN')} | {tipo_doc} | {str(e)}"
+                    failed_files.append(error_msg)
+                    logger.warning(f"[ZIP] ✗ {processed_count}/{total_docs} | FAILED: {error_msg}")
+        
+        # Ahora agregar todos los resultados al ZIP (ya procesados)
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             # 1. Agregar carpeta de información
             ZipService._add_info_folder(zip_file)
             
-            # 2. Procesar cada carpeta (ordenadas alfabéticamente)
-            for folder_path in sorted(grouped_docs.keys()):
-                folder_docs = grouped_docs[folder_path]
-                logger.info(f"[ZIP] Processing folder: {folder_path} ({len(folder_docs)} docs)")
-                
-                # Procesar cada documento en la carpeta
-                for idx, doc in enumerate(folder_docs, 1):
-                    processed_count += 1
-                    codigo_proforma = doc.get('codigo_proforma', 'UNKNOWN')
-                    tipo_doc = doc.get('tipo_documento', 'Otro')
-                    
-                    try:
-                        # Descargar archivo
-                        url = doc.get("url", "")
-                        if not url:
-                            raise ValueError("Missing document URL")
-
-                        content = download_service.download_file(url)
-                        if not content:
-                            raise ValueError("Download failed or file is empty")
-
-                        # Extraer nombre original para fallback de extensión
-                        original_filename = url.split("/")[-1].split("?")[0]
-
-                        # Convertir o determinar el modo de manejo
-                        result = pdf_service.convert_to_pdf(content, original_filename)
-                        if not result:
-                            raise ValueError(f"Unsupported file type or processing failed for {original_filename}")
-
-                        # --- Lógica de ZIP según el modo ---
-                        file_content = result["content"]
-                        file_extension = result["extension"]
-                        folder_path_var = generate_folder_path(doc, project_code or "PROJECT")
-
-                        if result["mode"] == "pdf":
-                            # Modo PDF: se nombra y agrega como siempre.
-                            filename = generate_filename(doc)
-                            zip_path = f"{folder_path_var}/{filename}"
-                            zip_file.writestr(zip_path, file_content)
-                            logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | PDF | {zip_path}")
-                        
-                        elif result["mode"] == "passthrough":
-                            # Modo Passthrough: usamos el nombre TALE pero con la extensión original.
-                            filename_base = generate_filename(doc).rsplit(".", 1)[0]
-                            filename = f"{filename_base}{file_extension}"
-                            zip_path = f"{folder_path_var}/{filename}"
-                            zip_file.writestr(zip_path, file_content)
-                            logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | PASSTHROUGH | {zip_path}")
-
-                    except Exception as e:
-                        error_msg = f"{codigo_proforma} | {tipo_doc} | {str(e)}"
-                        failed_files.append(error_msg)
-                        logger.warning(f"[ZIP] ✗ {processed_count}/{total_docs} | FAILED: {error_msg}")
-                        continue
+            # 2. Agregar archivos procesados
+            for zip_path, content in processed_results:
+                zip_file.writestr(zip_path, content)
             
             # 3. Agregar FAILED_FILES.txt si hubo errores
             if failed_files:
