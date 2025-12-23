@@ -64,55 +64,62 @@ class PDFService:
         return '' # Extensión desconocida
     
     @staticmethod
+    def _optimize_image_for_pdf(image: Image.Image) -> Image.Image:
+        """Reduce el tamaño de la imagen si excede las dimensiones de un A4 a 300 DPI."""
+        # Dimensiones de un A4 a 300 DPI: 2480x3508 píxeles.
+        A4_MAX_WIDTH = 2480
+        A4_MAX_HEIGHT = 3508
+        
+        width, height = image.size
+
+        if width > A4_MAX_WIDTH or height > A4_MAX_HEIGHT:
+            # Mantenemos la relación de aspecto.
+            ratio = min(A4_MAX_WIDTH / width, A4_MAX_HEIGHT / height)
+            new_width = int(width * ratio)
+            new_height = int(height * ratio)
+            
+            print(f"🔧 Optimizing image from {width}x{height} to {new_width}x{new_height}")
+            # Usamos LANCZOS que es el filtro de redimensionado de más alta calidad.
+            return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        return image # No necesita optimización.
+    
+    @staticmethod
     def image_to_pdf(image_bytes: bytes) -> Optional[bytes]:
-        """
-        Convierte una imagen a PDF
-        
-        Args:
-            image_bytes: Bytes de la imagen
-        
-        Returns:
-            Bytes del PDF o None si falla
-        """
+        """Convierte una imagen a PDF, optimizándola primero si es necesario."""
         try:
-            # Abrir imagen
             image = Image.open(io.BytesIO(image_bytes))
-            
-            # Convertir a RGB si es necesario
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
-            # Crear PDF en memoria
+
+            # --- INICIO DE LA OPTIMIZACIÓN ---
+            # 1. Optimizar la imagen antes de hacer cualquier otra cosa.
+            image = PDFService._optimize_image_for_pdf(image)
+            # --- FIN DE LA OPTIMIZACIÓN ---
+
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+
             pdf_buffer = io.BytesIO()
-            
-            # Calcular tamaño para ajustar a A4
-            a4_width, a4_height = A4
             img_width, img_height = image.size
-            
-            # Calcular escala para ajustar a A4 manteniendo aspecto
+            a4_width, a4_height = A4
+
             scale = min(a4_width / img_width, a4_height / img_height)
             new_width = img_width * scale
             new_height = img_height * scale
-            
-            # Crear PDF
+
             c = canvas.Canvas(pdf_buffer, pagesize=A4)
-            
-            # Centrar imagen en la página
             x = (a4_width - new_width) / 2
             y = (a4_height - new_height) / 2
+
+            # Usamos un buffer en memoria para pasar la imagen a reportlab.
+            with io.BytesIO() as temp_img_buffer:
+                image.save(temp_img_buffer, format="PNG")
+                temp_img_buffer.seek(0)
+                c.drawImage(temp_img_buffer, x, y, width=new_width, height=new_height)
             
-            # Guardar imagen temporalmente
-            temp_img = io.BytesIO()
-            image.save(temp_img, format='PNG')
-            temp_img.seek(0)
-            
-            # Dibujar imagen en PDF
-            c.drawImage(temp_img, x, y, width=new_width, height=new_height)
             c.save()
-            
             pdf_buffer.seek(0)
             return pdf_buffer.read()
-            
+
         except Exception as e:
             print(f"❌ Error converting image to PDF: {e}")
             return None
