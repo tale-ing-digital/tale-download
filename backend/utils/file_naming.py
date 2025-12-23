@@ -244,9 +244,9 @@ def generate_folder_path(doc: Dict[str, Any], project_code: str = None) -> str:
     
     # Si no hay nombre de cliente, usar documento como fallback
     if not nombre_cliente or nombre_cliente.strip() == '':
-        nombre_display = f"DNI {documento_cliente}"
+        nombre_display = f"DNI {documento_cliente}".upper()
     else:
-        nombre_display = sanitize_folder_name(nombre_cliente)
+        nombre_display = sanitize_folder_name(nombre_cliente).upper()
     
     # Formato final: {TIPO_UNIDAD}-{CODIGO_UNIDAD} - {NOMBRE_CLIENTE}
     folder_name = f"{unidad_id} - {nombre_display}"
