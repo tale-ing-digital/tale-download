@@ -2,6 +2,8 @@
 
 Sistema de exportación documental desde Business Intelligence (AWS Redshift) para TALE Inmobiliaria.
 
+> **🎉 v2.0.0 - 2025-12-23**: Release Production Ready con fix de conversión de imágenes, normalización a mayúsculas y puerto configurable. [Ver cambios →](./CHANGELOG.md)
+
 ## 📋 Descripción
 
 TaleDownload es un sistema **stateless** que permite consultar y descargar documentos almacenados en AWS Redshift, con las siguientes capacidades:
