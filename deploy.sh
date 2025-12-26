@@ -98,31 +98,29 @@ validate_environment() {
 ################################################################################
 
 cleanup_existing() {
-    print_header "Limpiando recursos existentes"
-    
-    # Detener contenedor si está corriendo
-    if podman ps -a | grep -q "$PROJECT_NAME"; then
-        print_info "Deteniendo contenedor $PROJECT_NAME..."
-        podman stop "$PROJECT_NAME" 2>/dev/null || true
-        sleep 2
-        print_success "Contenedor detenido"
-    else
-        print_info "Contenedor $PROJECT_NAME no encontrado (es normal en primer despliegue)"
+    print_header "Limpiando recursos existentes (systemd + podman)"
+
+    # Detener servicio systemd si existe
+    if systemctl --user list-unit-files | grep -q container-tale-download; then
+        print_info "Deteniendo servicio systemd..."
+        systemctl --user stop container-tale-download || true
+        systemctl --user reset-failed container-tale-download || true
+        print_success "Servicio systemd detenido"
     fi
-    
-    # Eliminar contenedor si existe
-    if podman container exists "$PROJECT_NAME" 2>/dev/null; then
-        print_info "Removiendo contenedor antiguo..."
-        podman rm "$PROJECT_NAME" 2>/dev/null || true
-        print_success "Contenedor removido"
+
+    # Eliminar contenedor residual si existe
+    if podman container exists "$PROJECT_NAME"; then
+        print_info "Eliminando contenedor residual..."
+        podman rm -f "$PROJECT_NAME" || true
+        print_success "Contenedor eliminado"
     fi
-    
-    # Si --force, eliminar imagen anterior
+
+    # Eliminar imagen anterior si --force
     if [ "$FORCE_DEPLOY" = true ]; then
         if podman images | grep -q "$PROJECT_NAME"; then
-            print_warning "Eliminando imagen antigua por --force..."
-            podman rmi "$PROJECT_NAME:latest" 2>/dev/null || true
-            print_success "Imagen removida"
+            print_warning "Eliminando imagen antigua (--force)..."
+            podman rmi "$PROJECT_NAME:latest" || true
+            print_success "Imagen eliminada"
         fi
     fi
 }
@@ -150,32 +148,23 @@ build_image() {
 }
 
 ################################################################################
-# INICIALIZACIÓN DEL CONTENEDOR
+# INICIALIZACIÓN DEL SERVICIO SYSTEMD
 ################################################################################
 
-start_container() {
-    print_header "Iniciando contenedor"
-    
-    print_info "Parámetros del contenedor:"
-    print_info "  - Nombre: $PROJECT_NAME"
-    print_info "  - Puerto: $PORT (interno: 8010)"
-    print_info "  - Imagen: $PROJECT_NAME:latest"
-    echo ""
-    
-    if podman run -d \
-        --name "$PROJECT_NAME" \
-        -p "$PORT:8010" \
-        --restart=unless-stopped \
-        --health-interval=30s \
-        --health-timeout=10s \
-        --health-retries=3 \
-        --health-start-period=10s \
-        --env-file .env \
-        "$PROJECT_NAME:latest"; then
-        
-        print_success "Contenedor iniciado con ID: $(podman ps --format '{{.ID}}' -f name="$PROJECT_NAME" | head -c 12)"
+start_systemd_service() {
+    print_header "Iniciando servicio systemd (Podman)"
+
+    systemctl --user daemon-reload
+    systemctl --user enable container-tale-download
+    systemctl --user restart container-tale-download
+
+    sleep 2
+
+    if systemctl --user is-active --quiet container-tale-download; then
+        print_success "Servicio systemd activo"
     else
-        print_error "Error al iniciar el contenedor"
+        print_error "El servicio systemd no inició correctamente"
+        systemctl --user status container-tale-download --no-pager
         exit 1
     fi
 }
@@ -190,7 +179,7 @@ validate_health() {
     print_info "Esperando a que el servicio esté listo..."
     local max_attempts=30
     local attempt=1
-    local health_url="http://localhost:$PORT/api/health"
+    local health_url="http://127.0.0.1:8010/api/health"
     
     while [ $attempt -le $max_attempts ]; do
         if curl -s "$health_url" > /dev/null 2>&1; then
@@ -207,7 +196,7 @@ validate_health() {
     
     print_error "Servicio no respondió después de $max_attempts intentos"
     print_error "Revisa los logs:"
-    print_info "  podman logs $PROJECT_NAME"
+    print_info "  journalctl --user -u container-tale-download -f"
     exit 1
 }
 
@@ -230,12 +219,12 @@ print_summary() {
     echo ""
     
     print_info "Comandos útiles:"
-    echo "  Ver logs:       podman logs -f $PROJECT_NAME"
-    echo "  Estado:         podman ps -f name=$PROJECT_NAME"
-    echo "  Estadísticas:   podman stats $PROJECT_NAME"
-    echo "  Detener:        podman stop $PROJECT_NAME"
-    echo "  Reiniciar:      podman restart $PROJECT_NAME"
-    echo "  Eliminar:       podman stop $PROJECT_NAME && podman rm $PROJECT_NAME"
+    echo "  Ver logs:       journalctl --user -u container-tale-download -f"
+    echo "  Estado:         systemctl --user status container-tale-download"
+    echo "  Detener:        systemctl --user stop container-tale-download"
+    echo "  Reiniciar:      systemctl --user restart container-tale-download"
+    echo "  Habilitar:      systemctl --user enable container-tale-download"
+    echo "  Deshabilitar:   systemctl --user disable container-tale-download"
     echo ""
 }
 
@@ -300,7 +289,7 @@ EOF
     echo ""
     build_image
     echo ""
-    start_container
+    start_systemd_service
     echo ""
     validate_health
     echo ""
