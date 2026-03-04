@@ -16,6 +16,13 @@ class Settings:
     REDSHIFT_USER: str = os.getenv("REDSHIFT_USER", "")
     REDSHIFT_PASSWORD: str = os.getenv("REDSHIFT_PASSWORD", "")
     
+    # Redshift pool / resilience
+    REDSHIFT_POOL_MIN: int = int(os.getenv("REDSHIFT_POOL_MIN", "1"))
+    REDSHIFT_POOL_MAX: int = int(os.getenv("REDSHIFT_POOL_MAX", "10"))
+    REDSHIFT_KEEPALIVE_IDLE: int = int(os.getenv("REDSHIFT_KEEPALIVE_IDLE", "30"))
+    REDSHIFT_QUERY_TIMEOUT: int = int(os.getenv("REDSHIFT_QUERY_TIMEOUT", "30000"))
+    REDSHIFT_RETRY_ATTEMPTS: int = int(os.getenv("REDSHIFT_RETRY_ATTEMPTS", "2"))
+    
     # Configuración general
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "500"))

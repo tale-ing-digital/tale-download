@@ -1,21 +1,25 @@
 """
 Servicio de conexión y consulta a AWS Redshift (Read-Only)
 """
+import time
+import threading
 import psycopg2
-from psycopg2 import pool
+import psycopg2.pool
 from typing import List, Dict, Any, Optional
 from backend.core.config import settings
 
+
 class RedshiftService:
-    """Servicio para consultas read-only a Redshift"""
+    """Servicio para consultas read-only a Redshift con reconexión automática"""
     
     def __init__(self):
         """Inicializa el connection pool"""
         self.connection_pool = None
+        self._pool_lock = threading.Lock()
         self._initialize_pool()
     
     def _initialize_pool(self):
-        """Crea el connection pool a Redshift"""
+        """Crea el connection pool a Redshift con TCP keepalive"""
         try:
             print(f"🔌 Intentando conectar a Redshift...")
             print(f"   Host: {settings.REDSHIFT_HOST}")
@@ -23,61 +27,148 @@ class RedshiftService:
             print(f"   Database: {settings.REDSHIFT_DATABASE}")
             print(f"   User: {settings.REDSHIFT_USER}")
             
-            self.connection_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1,
-                maxconn=10,
+            self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
+                minconn=settings.REDSHIFT_POOL_MIN,
+                maxconn=settings.REDSHIFT_POOL_MAX,
                 host=settings.REDSHIFT_HOST,
                 port=settings.REDSHIFT_PORT,
                 database=settings.REDSHIFT_DATABASE,
                 user=settings.REDSHIFT_USER,
                 password=settings.REDSHIFT_PASSWORD,
-                connect_timeout=10
+                connect_timeout=10,
+                # TCP keepalive: prevents AWS/NAT from silently killing idle connections
+                keepalives=1,
+                keepalives_idle=settings.REDSHIFT_KEEPALIVE_IDLE,
+                keepalives_interval=10,
+                keepalives_count=3,
+                options=f'-c statement_timeout={settings.REDSHIFT_QUERY_TIMEOUT}',
             )
-            print("✅ Redshift connection pool initialized")
+            print("✅ Redshift ThreadedConnectionPool initialized "
+                  f"(min={settings.REDSHIFT_POOL_MIN}, max={settings.REDSHIFT_POOL_MAX}, "
+                  f"keepalive_idle={settings.REDSHIFT_KEEPALIVE_IDLE}s, "
+                  f"query_timeout={settings.REDSHIFT_QUERY_TIMEOUT}ms)")
         except Exception as e:
             print(f"❌ Error initializing Redshift pool: {e}")
             print(f"   Tipo de error: {type(e).__name__}")
             print("⚠️  Backend will start but Redshift features will not work")
             self.connection_pool = None
+
+    def _ensure_pool(self):
+        """Ensures the connection pool is available, re-initializing if needed."""
+        if self.connection_pool is not None:
+            return
+        with self._pool_lock:
+            # Double-check after acquiring lock
+            if self.connection_pool is None:
+                print("🔄 Connection pool is None, attempting re-initialization...")
+                self._initialize_pool()
+        if self.connection_pool is None:
+            raise RuntimeError(
+                "Redshift connection not available. "
+                "Please configure REDSHIFT_* environment variables."
+            )
+
+    def _reinitialize_pool(self):
+        """Closes and recreates the entire connection pool."""
+        with self._pool_lock:
+            print("♻️  Reinitializing entire connection pool...")
+            old_pool = self.connection_pool
+            self.connection_pool = None
+            if old_pool is not None:
+                try:
+                    old_pool.closeall()
+                except Exception:
+                    pass
+            self._initialize_pool()
+
+    def _get_valid_connection(self):
+        """Gets a connection from the pool and validates it with a lightweight check."""
+        conn = self.connection_pool.getconn()
+        try:
+            # Fast check: psycopg2 tracks connection state
+            if conn.closed:
+                raise psycopg2.OperationalError("Connection is closed")
+            # Lightweight validation query
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            return conn
+        except Exception:
+            # Connection is dead — discard it and get a fresh one
+            print("⚠️  Stale connection detected, discarding...")
+            try:
+                self.connection_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            raise
     
     def execute_query(self, query: str, params: Optional[tuple] = None) -> List[Dict[str, Any]]:
-        """Ejecuta una query SELECT y retorna resultados como lista de diccionarios"""
-        if not self.connection_pool:
-            raise RuntimeError("Redshift connection not available. Please configure REDSHIFT_* environment variables.")
+        """Ejecuta una query SELECT con retry automático y validación de conexión."""
+        self._ensure_pool()
         
         # Permitir SELECT y WITH (CTEs - Common Table Expressions)
         query_upper = query.strip().upper()
         if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
             raise ValueError("Only SELECT queries are allowed (read-only)")
         
-        conn = None
-        try:
-            conn = self.connection_pool.getconn()
-            cursor = conn.cursor()
-            
-            if params:
-                cursor.execute(query, params)
-            else:
-                cursor.execute(query)
-            
-            # Check if cursor has a description (SELECT worked)
-            if cursor.description is None:
-                return []
-            
-            columns = [desc[0] for desc in cursor.description]
-            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-            
-            cursor.close()
-            return results
-            
-        except Exception as e:
-            print(f"❌ Error executing query: {e}")
-            import traceback
-            print(f"Traceback:\n{traceback.format_exc()}")
-            raise
-        finally:
-            if conn:
+        last_error = None
+        max_attempts = settings.REDSHIFT_RETRY_ATTEMPTS
+
+        for attempt in range(1, max_attempts + 1):
+            conn = None
+            try:
+                conn = self._get_valid_connection()
+                cursor = conn.cursor()
+                
+                if params:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
+                
+                if cursor.description is None:
+                    cursor.close()
+                    self.connection_pool.putconn(conn)
+                    return []
+                
+                columns = [desc[0] for desc in cursor.description]
+                results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+                
+                cursor.close()
                 self.connection_pool.putconn(conn)
+                return results
+                
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+                last_error = e
+                print(f"⚠️  Connection error on attempt {attempt}/{max_attempts}: {e}")
+                # Close broken connection, don't return it to pool
+                if conn is not None:
+                    try:
+                        self.connection_pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                    conn = None
+                # On failure, reinitialize the entire pool before retrying
+                if attempt < max_attempts:
+                    self._reinitialize_pool()
+                    if self.connection_pool is None:
+                        break
+                    backoff = min(1.0 * attempt, 3.0)
+                    print(f"⏳ Retrying in {backoff}s...")
+                    time.sleep(backoff)
+            except Exception as e:
+                print(f"❌ Error executing query: {e}")
+                import traceback
+                print(f"Traceback:\n{traceback.format_exc()}")
+                if conn is not None:
+                    try:
+                        self.connection_pool.putconn(conn, close=True)
+                    except Exception:
+                        pass
+                raise
+        
+        # All retries exhausted
+        print(f"❌ All {max_attempts} attempts failed. Last error: {last_error}")
+        raise RuntimeError(f"Redshift query failed after {max_attempts} attempts: {last_error}")
     
     def get_projects_summary(self) -> List[Dict[str, Any]]:
         """Obtiene resumen de proyectos con total de documentos"""
@@ -590,14 +681,25 @@ class RedshiftService:
         return diagnosis
     
     def test_connection(self) -> bool:
-        """Prueba la conexión a Redshift"""
-        if not self.connection_pool:
+        """Prueba la conexión a Redshift, intentando re-inicializar si falla."""
+        # Try to ensure pool exists
+        try:
+            self._ensure_pool()
+        except RuntimeError:
             return False
         try:
             self.execute_query("SELECT 1 as test")
             return True
-        except:
-            return False
+        except Exception:
+            # Attempt one more re-init
+            try:
+                self._reinitialize_pool()
+                if self.connection_pool is None:
+                    return False
+                self.execute_query("SELECT 1 as test")
+                return True
+            except Exception:
+                return False
     
     def close(self):
         """Cierra el connection pool"""

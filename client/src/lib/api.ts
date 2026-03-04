@@ -274,6 +274,9 @@ export function handleApiError(error: unknown): string {
     const axiosError = error as AxiosError<{ detail?: string; error?: string }>;
     
     if (axiosError.response) {
+      if (axiosError.response.status === 503) {
+        return 'Base de datos no disponible. Reconectando...';
+      }
       const detail = axiosError.response.data?.detail || axiosError.response.data?.error;
       return detail || `Error ${axiosError.response.status}: ${axiosError.response.statusText}`;
     } else if (axiosError.request) {
@@ -282,4 +285,14 @@ export function handleApiError(error: unknown): string {
   }
   
   return 'Error desconocido. Intente nuevamente.';
+}
+
+/**
+ * Returns true if the error is a 503 Service Unavailable (Redshift down).
+ */
+export function isServiceUnavailable(error: unknown): boolean {
+  if (axios.isAxiosError(error)) {
+    return error.response?.status === 503;
+  }
+  return false;
 }

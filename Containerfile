@@ -63,5 +63,11 @@ EXPOSE 8010
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8010/api/health', timeout=5)"
 
-# Run application
-CMD ["python", "-m", "backend.main"]
+# Run application with multiple workers for better concurrency
+# 4 workers = can handle 4 simultaneous ZIP generations without blocking web UI
+CMD ["uvicorn", "backend.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8010", \
+     "--workers", "4", \
+     "--timeout-keep-alive", "10", \
+     "--timeout-graceful-shutdown", "60"]

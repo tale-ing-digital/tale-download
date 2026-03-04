@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '@/components/layout';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import {
   getDocuments,
   downloadProjectZip,
   handleApiError,
+  isServiceUnavailable,
   type Document,
   type Project,
 } from '@/lib/api';
@@ -25,8 +26,10 @@ interface FilterState {
 export default function Home() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
+  const [connectionError, setConnectionError] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const lastLoadRef = useRef<number>(0);
   
   // SEPARACIÓN: filtros en preparación vs filtros aplicados
   const [pendingFilters, setPendingFilters] = useState<FilterState>({
@@ -82,13 +85,48 @@ export default function Home() {
     loadInitialData();
   }, []);
 
+  // Auto-refresh: reload data when user returns to the tab or window regains focus
+  useEffect(() => {
+    const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - lastLoadRef.current;
+        if (elapsed > STALE_THRESHOLD_MS) {
+          loadInitialData();
+        }
+      }
+    };
+
+    const handleFocus = () => {
+      const elapsed = Date.now() - lastLoadRef.current;
+      if (elapsed > STALE_THRESHOLD_MS) {
+        loadInitialData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
   const loadInitialData = async () => {
     setLoading(true);
+    setConnectionError(false);
     try {
       const projectsData = await getProjectsList();
       setProjects(projectsData.projects);
+      lastLoadRef.current = Date.now();
     } catch (error) {
-      toast.error(handleApiError(error));
+      if (isServiceUnavailable(error)) {
+        setConnectionError(true);
+        toast.error('Base de datos no disponible. Intente de nuevo en unos segundos.');
+      } else {
+        toast.error(handleApiError(error));
+      }
     } finally {
       setLoading(false);
     }
@@ -332,6 +370,22 @@ export default function Home() {
                   </Card>
                 ))}
               </div>
+            ) : connectionError ? (
+              /* CONNECTION ERROR STATE */
+              <Card className="text-center py-12 border-destructive/50 bg-destructive/5">
+                <CardContent>
+                  <AlertIcon className="mx-auto mb-4 w-12 h-12 text-destructive" />
+                  <h3 className="text-lg font-semibold text-foreground mb-2">
+                    Error de conexión a la base de datos
+                  </h3>
+                  <p className="text-muted-foreground mb-6">
+                    No se pudo conectar a Redshift. La conexión se recuperará automáticamente.
+                  </p>
+                  <Button onClick={loadInitialData} variant="default" size="sm">
+                    Reintentar
+                  </Button>
+                </CardContent>
+              </Card>
             ) : (
               <>
                 <div className="mb-6 flex items-center justify-between">

@@ -2,7 +2,7 @@
 Endpoints FastAPI para TaleDownload
 """
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Optional
 from backend.api.models import (
     DocumentListResponse,
@@ -30,15 +30,19 @@ from backend.core.config import settings
 
 router = APIRouter(prefix="/api", tags=["TaleDownload"])
 
-@router.get("/health", response_model=HealthResponse)
+@router.get("/health")
 async def health_check():
-    """Health check del backend"""
+    """Health check del backend — intenta reconectar si el pool está muerto."""
     redshift_connected = redshift_service.test_connection()
-    return HealthResponse(
-        status="healthy" if redshift_connected else "degraded",
+    status = "healthy" if redshift_connected else "degraded"
+    payload = HealthResponse(
+        status=status,
         version=settings.VERSION,
-        redshift_connected=redshift_connected
+        redshift_connected=redshift_connected,
     )
+    if not redshift_connected:
+        return JSONResponse(status_code=503, content=payload.model_dump())
+    return payload
 
 @router.get("/debug/columns")
 async def get_table_columns():
@@ -71,8 +75,11 @@ async def get_all_projects():
                 ultima_fecha_carga=str(p.get('ultima_fecha_carga')) if p.get('ultima_fecha_carga') else None
             ) for p in projects
         ])
-    except RuntimeError:
-        return ProjectsResponse(total=0, projects=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching projects: {str(e)}")
 
@@ -84,8 +91,11 @@ async def get_all_document_types():
         return DocumentTypesResponse(total=len(doc_types), types=[
             DocumentTypeModel(tipo_documento=t['tipo_documento']) for t in doc_types
         ])
-    except RuntimeError:
-        return DocumentTypesResponse(total=0, types=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching document types: {str(e)}")
 
@@ -127,9 +137,11 @@ async def get_project_options(q: Optional[str] = None, limit: int = 50):
     try:
         project_codes = redshift_service.get_project_codes(search_query=q, limit=limit)
         return FilterOptionsResponse(options=project_codes)
-    except RuntimeError:
-        # No hay conexión a Redshift, devolver lista vacía
-        return FilterOptionsResponse(options=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching project options: {str(e)}")
 
@@ -139,9 +151,11 @@ async def get_document_type_options():
     try:
         document_types = redshift_service.get_document_types()
         return FilterOptionsResponse(options=document_types)
-    except RuntimeError:
-        # No hay conexión a Redshift, devolver lista vacía
-        return FilterOptionsResponse(options=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching document type options: {str(e)}")
 
@@ -152,9 +166,11 @@ async def get_projects():
         projects_data = redshift_service.get_projects_summary()
         projects = [ProjectSummaryModel(**p) for p in projects_data]
         return ProjectListResponse(total=len(projects), projects=projects)
-    except RuntimeError:
-        # No hay conexión a Redshift, devolver lista vacía
-        return ProjectListResponse(total=0, projects=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching projects: {str(e)}")
 
@@ -184,9 +200,11 @@ async def get_documents(
         )
         documents = [DocumentModel(**d) for d in documents_data]
         return DocumentListResponse(total=len(documents), documents=documents)
-    except RuntimeError:
-        # No hay conexión a Redshift, devolver lista vacía
-        return DocumentListResponse(total=0, documents=[])
+    except RuntimeError as e:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching documents: {str(e)}")
 
