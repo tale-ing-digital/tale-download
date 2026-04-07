@@ -1,8 +1,8 @@
-# 📋 TALE DOWNLOAD - INFORME BACKEND FINAL
+# 🏗️ ARCHITECTURE - TALE Download Backend
 
-**Fecha:** 21 de Diciembre de 2025  
-**Backend Lead:** Sistema completado y validado  
-**Estado:** ✅ PRODUCCIÓN READY
+**Fecha**: 21 de Diciembre de 2025
+**Backend Lead**: Sistema completado y validado
+**Estado**: ✅ PRODUCCIÓN READY
 
 ---
 
@@ -70,7 +70,7 @@ CASE
          LOWER(COALESCE(a.montaje, '')) LIKE '%minuta%' THEN 'Minuta'
     WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%adenda%' OR
          LOWER(COALESCE(a.montaje, '')) LIKE '%adenda%' THEN 'Adenda'
-    WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%carta%' OR 
+    WHEN LOWER(COALESCE(a.nombre, '')) LIKE '%carta%' OR
          LOWER(COALESCE(a.nombre, '')) LIKE '%aprobac%' OR
          LOWER(COALESCE(a.montaje, '')) LIKE '%carta%' THEN 'Carta de Aprobación'
     ELSE 'Otro'
@@ -157,9 +157,9 @@ tale.clientes
 
 ```sql
 FROM tale.archivos a
-INNER JOIN tale.proforma_unidad pu 
+INNER JOIN tale.proforma_unidad pu
     ON a.codigo_proforma = pu.codigo_proforma
-LEFT JOIN tale.clientes c 
+LEFT JOIN tale.clientes c
     ON pu.documento_cliente = c.documento
 ```
 
@@ -173,7 +173,7 @@ LEFT JOIN tale.clientes c
 CASE
     WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%departamento%' THEN 'DPTO'
     WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%estacionamiento%' THEN 'EST'
-    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%depósito%' OR 
+    WHEN LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%depósito%' OR
          LOWER(COALESCE(pu.tipo_unidad, '')) LIKE '%deposito%' THEN 'DEP'
     ELSE 'OTRO'
 END AS tipo_unidad
@@ -253,7 +253,7 @@ DEP-D01 - Ursula Angaya Gomez/
 
 ## 🎉 CONCLUSIÓN
 
-El sistema **TALE Download** está completamente operativo y cumple con todos los requisitos del Backend Lead Senior:
+El sistema **TALE Download** está completamente operativo y cumple con todos los requisitos:
 
 - ✅ ZIP funciona perfectamente
 - ✅ Estructura congelada respetada

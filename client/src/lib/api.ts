@@ -137,21 +137,6 @@ export interface DownloadZipRequest {
 // API FUNCTIONS
 // ============================================================================
 
-export async function healthCheck(): Promise<HealthResponse> {
-  const response = await apiClient.get<HealthResponse>('/health');
-  return response.data;
-}
-
-export async function getProjects(): Promise<ProjectListResponse> {
-  const response = await apiClient.get<ProjectListResponse>('/projects');
-  return response.data;
-}
-
-export async function getProjectOptions(): Promise<string[]> {
-  const response = await apiClient.get<{ options: string[] }>('/filters/projects');
-  return response.data.options;
-}
-
 export async function getProjectsList(): Promise<ProjectsResponse> {
   const response = await apiClient.get<ProjectsResponse>('/projects/all');
   return response.data;
@@ -169,80 +154,11 @@ export async function getDocumentTypeOptions(): Promise<string[]> {
   return response.data.options;
 }
 
-export async function getDocumentTypesList(): Promise<DocumentTypesResponse> {
-  const response = await apiClient.get<DocumentTypesResponse>('/document-types/all');
-  return response.data;
-}
-
-export async function getUnitTypesList(): Promise<TipoUnidadResponse> {
-  const response = await apiClient.get<TipoUnidadResponse>('/unit-types/all');
-  return response.data;
-}
-
 export async function getDocuments(filters?: DocumentFilters): Promise<DocumentListResponse> {
   const response = await apiClient.get<DocumentListResponse>('/documents', {
     params: filters,
   });
   return response.data;
-}
-
-export async function downloadDocument(codigoProforma: string): Promise<void> {
-  const response = await apiClient.get(`/download/document/${codigoProforma}`, {
-    responseType: 'blob',
-  });
-  
-  const contentDisposition = response.headers['content-disposition'];
-  let filename = `${codigoProforma}.pdf`;
-  
-  if (contentDisposition) {
-    const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-    if (filenameMatch) {
-      filename = filenameMatch[1];
-    }
-  }
-  
-  const blob = new Blob([response.data], { type: 'application/pdf' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
-}
-
-export async function downloadZip(request: DownloadZipRequest): Promise<void> {
-  const response = await apiClient.post('/download/zip', request, {
-    responseType: 'blob',
-    timeout: 0, // Sin timeout - necesario para archivos muy grandes
-    onDownloadProgress: (progressEvent) => {
-      if (progressEvent.total) {
-        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-        console.log(`Download progress: ${percentCompleted}%`);
-      }
-    }
-  });
-  
-  const contentDisposition = response.headers['content-disposition'];
-  let filename = 'tale_documents.zip';
-  
-  if (contentDisposition) {
-    const filenameMatch = contentDisposition.match(/filename="(.+)"/);
-    if (filenameMatch) {
-      filename = filenameMatch[1];
-    }
-  }
-  
-  const blob = new Blob([response.data], { type: 'application/zip' });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
 }
 
 export async function downloadProjectZip(projectCode: string, queryString?: string): Promise<void> {

@@ -156,16 +156,11 @@ El frontend estará disponible en: `http://localhost:3000`
 ### Documentación Técnica
 Toda la documentación técnica está organizada en la carpeta [`docs/`](./docs/):
 
-- 📋 **[Implementación de Filtros](./docs/IMPLEMENTACION_FILTROS_Y_CLASIFICACION.md)** - Sistema de filtros y clasificación de documentos
-- 🚀 **[Guía de Despliegue](./docs/DESPLIEGUE.md)** - Instrucciones completas para deployment
-- 🔧 **[Fixes Aplicados](./docs/FIX_CTE_ERROR_500.md)** - Soluciones a errores conocidos
-- 📊 **[Mejora de Clasificación](./docs/MEJORA_CLASIFICACION_DOCUMENTOS.md)** - Sistema de cortafuegos para clasificación
-- 📖 **[Reporte Backend](./docs/BACKEND_FINAL_REPORT.md)** - Documentación completa del backend
-- 📝 **[Análisis de Documentos](./docs/ANALISIS_DOCUMENTOS.md)** - Análisis de tipos documentales
-- ✅ **[Correcciones Completadas](./docs/CORRECION_COMPLETADA.md)** - Historial de correcciones
-- 📋 **[Resumen de Cambios](./docs/CAMBIOS_RESUMO.md)** - Changelog
+- 🏗️ **[Arquitectura Backend](./docs/ARCHITECTURE.md)** - Documentación completa de arquitectura, filtros, clasificación y estructura del ZIP
+- 📖 **[Changelog](./docs/CHANGELOG.md)** - Historial de versiones y cambios notables
+- 🚀 **[Quick Reference](./docs/QUICK_REFERENCE.md)** - Guía rápida de operación y comandos útiles
+- 🔧 **[Systemd Autostart](./docs/SYSTEMD_AUTOSTART.md)** - Configuración de auto-inicio con systemd
 - 💡 **[Ideas](./docs/ideas.md)** - Ideas para futuras mejoras
-- ☑️ **[Todo](./docs/todo.md)** - Lista de tareas pendientes
 
 ## 🔌 Endpoints Principales
 
