@@ -279,23 +279,53 @@ class RedshiftService:
             
             CASE
                 /* A) CORTAFUEGOS: bloquear falsos positivos antes de clasificar */
+                WHEN REGEXP_INSTR(txt, '(^| )proforma( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )checklist( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )cuota(s)? inicial') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )cuota [123456]( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )(cuota_1|cuota_2|cuota_3|cuota_4)( |$)') > 0 THEN 'Otro'
+
                 WHEN
-                    REGEXP_INSTR(txt, '(^| )(contrato|cont)( |$)') > 0
-                    AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                    REGEXP_INSTR(txt, '(^| )contrato( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )(separacion|separacion)( |$)') > 0
                 THEN 'Otro'
-                
+
                 WHEN
                     REGEXP_INSTR(txt, '(^| )(cronograma|crono)( |$)') > 0
                     AND REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
                 THEN 'Otro'
-                
-                /* 1) MINUTA (incluye preminuta / pre minuta) */
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )compromiso( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )ahorro( |$)') > 0
+                THEN 'Otro'
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )correo( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )condicion(es)?( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )ahorro( |$)') > 0
+                THEN 'Otro'
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )formato( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )operacion( |$)') > 0
+                THEN 'Otro'
+
+                WHEN REGEXP_INSTR(txt, '(^| )(dj|djnp|djsbs|declaracion jurada)( |$)') > 0 THEN 'Otro'
+
+                /* 1) MINUTA (incluye preminuta / pre minuta / MCV / minuta de compra venta) */
                 WHEN
                     STRPOS(txt, 'minuta') > 0
                     OR STRPOS(txt, 'preminuta') > 0
                     OR STRPOS(txt, 'pre minuta') > 0
+                    OR REGEXP_INSTR(txt, '(^| )mcv( |$)') > 0
+                    OR (
+                        REGEXP_INSTR(txt, '(^| )minuta( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(^| )compra( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(^| )venta( |$)') > 0
+                    )
                 THEN 'Minuta'
-                
+
                 /* 2) ADENDA */
                 WHEN
                     STRPOS(txt, 'adenda') > 0
@@ -307,8 +337,8 @@ class RedshiftService:
                     OR STRPOS(txt, 'modificac') > 0
                     OR STRPOS(txt, 'renuncia hipoteca') > 0
                 THEN 'Adenda'
-                
-                /* 3) CARTA DE APROBACIÓN */
+
+                /* 3) CARTA DE APROBACIÓN (incluye CA cuando va con contexto de aprobacion) */
                 WHEN
                     (
                         STRPOS(txt, 'carta') > 0
@@ -320,9 +350,14 @@ class RedshiftService:
                     OR REGEXP_INSTR(txt, '(^| )aprobacion( |$)') > 0
                     OR REGEXP_INSTR(txt, '(^| )aprobacion( |$).*(gerencia|banco)( |$)') > 0
                     OR REGEXP_INSTR(txt, '(^| )correo( |$).*aprob') > 0
+                    OR (
+                        REGEXP_INSTR(txt, '(^| )ca( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(aprob|preacept|banco|validac|conformidad)') > 0
+                    )
+                    OR REGEXP_INSTR(txt, '(^| )carta( |$).*aprobacion') > 0
                 THEN 'Carta de Aprobación'
-                
-                /* 4) VOUCHER (señales fuertes) */
+
+                /* 4) VOUCHER (señales fuertes + nuevas etiquetas con contexto) */
                 WHEN
                     STRPOS(txt, 'voucher') > 0
                     OR STRPOS(txt, 'vaucher') > 0
@@ -335,15 +370,26 @@ class RedshiftService:
                     OR STRPOS(txt, 'operacion') > 0
                     OR STRPOS(txt, 'interbanc') > 0
                     OR (
+                        REGEXP_INSTR(txt, '(^| )vs( |$)') > 0
+                        AND (
+                            STRPOS(txt, 'voucher') > 0
+                            OR REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                        )
+                    )
+                    OR (
+                        STRPOS(txt, 'voucher') > 0
+                        AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                    )
+                    OR (
                         STRPOS(txt, 'constancia') > 0
                         AND REGEXP_INSTR(txt, '(^| )(transfer|transf|pago|abono|deposit|operacion)( |$)') > 0
                     )
                 THEN 'Voucher'
-                
+
                 /* 5) VOUCHER (señal débil: "pago" pero ya bloqueamos cronogramas arriba) */
                 WHEN REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
                 THEN 'Voucher'
-                
+
                 ELSE 'Otro'
             END AS tipo_documento
             
@@ -428,24 +474,54 @@ class RedshiftService:
             base.fecha_carga,
             
             CASE
-                /* A) CORTAFUEGOS */
+                /* A) CORTAFUEGOS: bloquear falsos positivos antes de clasificar */
+                WHEN REGEXP_INSTR(txt, '(^| )proforma( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )checklist( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )cuota(s)? inicial') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )cuota [123456]( |$)') > 0 THEN 'Otro'
+                WHEN REGEXP_INSTR(txt, '(^| )(cuota_1|cuota_2|cuota_3|cuota_4)( |$)') > 0 THEN 'Otro'
+
                 WHEN
-                    REGEXP_INSTR(txt, '(^| )(contrato|cont)( |$)') > 0
-                    AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                    REGEXP_INSTR(txt, '(^| )contrato( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )(separacion|separacion)( |$)') > 0
                 THEN 'Otro'
-                
+
                 WHEN
                     REGEXP_INSTR(txt, '(^| )(cronograma|crono)( |$)') > 0
                     AND REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
                 THEN 'Otro'
-                
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )compromiso( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )ahorro( |$)') > 0
+                THEN 'Otro'
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )correo( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )condicion(es)?( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )ahorro( |$)') > 0
+                THEN 'Otro'
+
+                WHEN
+                    REGEXP_INSTR(txt, '(^| )formato( |$)') > 0
+                    AND REGEXP_INSTR(txt, '(^| )operacion( |$)') > 0
+                THEN 'Otro'
+
+                WHEN REGEXP_INSTR(txt, '(^| )(dj|djnp|djsbs|declaracion jurada)( |$)') > 0 THEN 'Otro'
+
                 /* 1) MINUTA */
                 WHEN
                     STRPOS(txt, 'minuta') > 0
                     OR STRPOS(txt, 'preminuta') > 0
                     OR STRPOS(txt, 'pre minuta') > 0
+                    OR REGEXP_INSTR(txt, '(^| )mcv( |$)') > 0
+                    OR (
+                        REGEXP_INSTR(txt, '(^| )minuta( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(^| )compra( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(^| )venta( |$)') > 0
+                    )
                 THEN 'Minuta'
-                
+
                 /* 2) ADENDA */
                 WHEN
                     STRPOS(txt, 'adenda') > 0
@@ -457,7 +533,7 @@ class RedshiftService:
                     OR STRPOS(txt, 'modificac') > 0
                     OR STRPOS(txt, 'renuncia hipoteca') > 0
                 THEN 'Adenda'
-                
+
                 /* 3) CARTA DE APROBACIÓN */
                 WHEN
                     (
@@ -470,9 +546,14 @@ class RedshiftService:
                     OR REGEXP_INSTR(txt, '(^| )aprobacion( |$)') > 0
                     OR REGEXP_INSTR(txt, '(^| )aprobacion( |$).*(gerencia|banco)( |$)') > 0
                     OR REGEXP_INSTR(txt, '(^| )correo( |$).*aprob') > 0
+                    OR (
+                        REGEXP_INSTR(txt, '(^| )ca( |$)') > 0
+                        AND REGEXP_INSTR(txt, '(aprob|preacept|banco|validac|conformidad)') > 0
+                    )
+                    OR REGEXP_INSTR(txt, '(^| )carta( |$).*aprobacion') > 0
                 THEN 'Carta de Aprobación'
-                
-                /* 4) VOUCHER (señales fuertes) */
+
+                /* 4) VOUCHER (señales fuertes + nuevas etiquetas con contexto) */
                 WHEN
                     STRPOS(txt, 'voucher') > 0
                     OR STRPOS(txt, 'vaucher') > 0
@@ -485,15 +566,26 @@ class RedshiftService:
                     OR STRPOS(txt, 'operacion') > 0
                     OR STRPOS(txt, 'interbanc') > 0
                     OR (
+                        REGEXP_INSTR(txt, '(^| )vs( |$)') > 0
+                        AND (
+                            STRPOS(txt, 'voucher') > 0
+                            OR REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                        )
+                    )
+                    OR (
+                        STRPOS(txt, 'voucher') > 0
+                        AND REGEXP_INSTR(txt, '(^| )(separacion|sep)( |$)') > 0
+                    )
+                    OR (
                         STRPOS(txt, 'constancia') > 0
                         AND REGEXP_INSTR(txt, '(^| )(transfer|transf|pago|abono|deposit|operacion)( |$)') > 0
                     )
                 THEN 'Voucher'
-                
+
                 /* 5) VOUCHER (señal débil) */
                 WHEN REGEXP_INSTR(txt, '(^| )pago(s)?( |$)') > 0
                 THEN 'Voucher'
-                
+
                 ELSE 'Otro'
             END AS tipo_documento
             
