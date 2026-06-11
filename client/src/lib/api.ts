@@ -251,19 +251,16 @@ export async function pollJobStatus(jobId: string): Promise<ZipJobStatus> {
   return response.data;
 }
 
-/** Trigger a browser download of the completed ZIP file. */
-export async function downloadJobFile(jobId: string, projectCode: string): Promise<void> {
-  const response = await apiClient.get(`/jobs/${jobId}/download`, {
-    responseType: 'blob',
-    timeout: 120000,
-  });
-  const blob = new Blob([response.data], { type: 'application/zip' });
-  const urlObj = window.URL.createObjectURL(blob);
+/** Trigger a native browser download of the completed ZIP file.
+ *  Uses a direct anchor link so the browser streams it to disk without
+ *  loading the entire file into JS memory — required for large ZIPs (>500 MB).
+ */
+export function downloadJobFile(jobId: string, projectCode: string): void {
+  const url = `/api/jobs/${jobId}/download`;
   const link = document.createElement('a');
-  link.href = urlObj;
+  link.href = url;
   link.download = `${projectCode}.zip`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  window.URL.revokeObjectURL(urlObj);
 }

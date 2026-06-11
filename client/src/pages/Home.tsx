@@ -151,9 +151,9 @@ export default function Home() {
           changed = true;
 
           if (status.status === 'done') {
-            // Trigger browser download then clear the job entry
+            // Trigger native browser download (no blob in memory — handles large ZIPs)
             try {
-              await downloadJobFile(job.jobId, projectCode);
+              downloadJobFile(job.jobId, projectCode);
               toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`);
             } catch (dlErr) {
               toast.error(`Error al descargar el ZIP: ${handleApiError(dlErr)}`);
