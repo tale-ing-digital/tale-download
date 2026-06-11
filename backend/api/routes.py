@@ -1,6 +1,10 @@
 """
 Endpoints FastAPI para TaleDownload
 """
+import asyncio
+import logging
+import time
+import uuid
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Optional
@@ -29,6 +33,12 @@ from backend.utils.file_naming import generate_filename
 from backend.core.config import settings
 
 router = APIRouter(prefix="/api", tags=["TaleDownload"])
+logger = logging.getLogger(__name__)
+
+
+def _remaining_time(deadline: float) -> float:
+    """Returns remaining time in seconds with a 1s minimum guard."""
+    return max(1.0, deadline - time.monotonic())
 
 
 
@@ -168,33 +178,114 @@ async def download_project_zip(
         start_date: Fecha inicio (YYYY-MM-DD)
         end_date: Fecha fin (YYYY-MM-DD)
     """
+    request_id = uuid.uuid4().hex[:8]
+    t_total_start = time.perf_counter()
+    deadline = time.monotonic() + settings.ZIP_REQUEST_TIMEOUT_SEC
+
     try:
         # Parsear tipos de documento
         doc_type_list = None
         if document_types:
-            doc_type_list = [t.strip() for t in document_types.split(',') if t.strip()]
-        
-        documents_data = redshift_service.get_documents(
-            project_code=project_code,
-            document_types=doc_type_list,
-            start_date=start_date,
-            end_date=end_date,
-            limit=100000
+            # Preserve order and remove duplicates to avoid accidental query expansion
+            doc_type_list = list(dict.fromkeys(t.strip() for t in document_types.split(',') if t.strip()))
+
+        logger.info(
+            "[ZIP:%s] START project=%s types=%s start_date=%s end_date=%s timeout_total=%ss",
+            request_id,
+            project_code,
+            doc_type_list,
+            start_date,
+            end_date,
+            settings.ZIP_REQUEST_TIMEOUT_SEC,
+        )
+
+        t_redshift_start = time.perf_counter()
+        documents_data = await asyncio.wait_for(
+            asyncio.to_thread(
+                redshift_service.get_documents,
+                project_code=project_code,
+                document_types=doc_type_list,
+                start_date=start_date,
+                end_date=end_date,
+                limit=100000,
+            ),
+            timeout=min(settings.ZIP_REDSHIFT_TIMEOUT_SEC, _remaining_time(deadline)),
+        )
+        redshift_elapsed = time.perf_counter() - t_redshift_start
+
+        logger.info(
+            "[ZIP:%s] REDSHIFT_OK docs=%s elapsed=%.2fs",
+            request_id,
+            len(documents_data),
+            redshift_elapsed,
         )
         
         if not documents_data:
             raise HTTPException(status_code=404, detail=f"No documents found for project {project_code}")
-        
-        zip_buffer = zip_service.create_zip(documents_data, project_code=project_code)
+
+        t_zip_start = time.perf_counter()
+        zip_buffer = await asyncio.wait_for(
+            asyncio.to_thread(
+                zip_service.create_zip,
+                documents_data,
+                project_code=project_code,
+                request_id=request_id,
+            ),
+            timeout=min(settings.ZIP_GENERATION_TIMEOUT_SEC, _remaining_time(deadline)),
+        )
+        zip_elapsed = time.perf_counter() - t_zip_start
+
+        logger.info(
+            "[ZIP:%s] ZIP_OK elapsed=%.2fs",
+            request_id,
+            zip_elapsed,
+        )
         
         filename = f"{project_code}.zip"
+
+        total_elapsed = time.perf_counter() - t_total_start
+        logger.info(
+            "[ZIP:%s] COMPLETE project=%s total_elapsed=%.2fs docs=%s",
+            request_id,
+            project_code,
+            total_elapsed,
+            len(documents_data),
+        )
         
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{filename}"'}
         )
+    except asyncio.TimeoutError:
+        total_elapsed = time.perf_counter() - t_total_start
+        logger.error(
+            "[ZIP:%s] TIMEOUT project=%s total_elapsed=%.2fs",
+            request_id,
+            project_code,
+            total_elapsed,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "La descarga excedio el tiempo de espera del servidor. "
+                "Intente con menos tipos o un rango de fechas mas corto."
+            ),
+        )
+    except RuntimeError as e:
+        logger.error("[ZIP:%s] REDSHIFT_UNAVAILABLE error=%s", request_id, str(e))
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Redshift connection unavailable", "error": str(e)},
+        )
     except HTTPException:
         raise
     except Exception as e:
+        total_elapsed = time.perf_counter() - t_total_start
+        logger.exception(
+            "[ZIP:%s] FAILED project=%s total_elapsed=%.2fs",
+            request_id,
+            project_code,
+            total_elapsed,
+        )
         raise HTTPException(status_code=500, detail=f"Error creating project ZIP: {str(e)}")

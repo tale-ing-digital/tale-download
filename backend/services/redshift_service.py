@@ -1,12 +1,16 @@
 """
 Servicio de conexión y consulta a AWS Redshift (Read-Only)
 """
+import hashlib
+import logging
 import time
 import threading
 import psycopg2
 import psycopg2.pool
 from typing import List, Dict, Any, Optional
 from backend.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class RedshiftService:
@@ -83,7 +87,16 @@ class RedshiftService:
 
     def _get_valid_connection(self):
         """Gets a connection from the pool and validates it with a lightweight check."""
+        t_pool_start = time.perf_counter()
         conn = self.connection_pool.getconn()
+        pool_wait_ms = (time.perf_counter() - t_pool_start) * 1000
+        if pool_wait_ms >= settings.REDSHIFT_SLOW_POOL_WAIT_MS:
+            logger.warning(
+                "[REDSHIFT] Slow pool wait: %.2fms (threshold=%sms)",
+                pool_wait_ms,
+                settings.REDSHIFT_SLOW_POOL_WAIT_MS,
+            )
+
         try:
             # Fast check: psycopg2 tracks connection state
             if conn.closed:
@@ -113,9 +126,12 @@ class RedshiftService:
         
         last_error = None
         max_attempts = settings.REDSHIFT_RETRY_ATTEMPTS
+        query_fingerprint = hashlib.sha1(query.encode("utf-8")).hexdigest()[:10]
+        params_count = len(params) if params else 0
 
         for attempt in range(1, max_attempts + 1):
             conn = None
+            t_query_start = time.perf_counter()
             try:
                 conn = self._get_valid_connection()
                 cursor = conn.cursor()
@@ -132,6 +148,26 @@ class RedshiftService:
                 
                 columns = [desc[0] for desc in cursor.description]
                 results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+                elapsed_ms = (time.perf_counter() - t_query_start) * 1000
+                if elapsed_ms >= settings.REDSHIFT_SLOW_QUERY_MS:
+                    logger.warning(
+                        "[REDSHIFT] Slow query fp=%s attempt=%s rows=%s elapsed=%.2fms params=%s",
+                        query_fingerprint,
+                        attempt,
+                        len(results),
+                        elapsed_ms,
+                        params_count,
+                    )
+                else:
+                    logger.info(
+                        "[REDSHIFT] Query ok fp=%s attempt=%s rows=%s elapsed=%.2fms params=%s",
+                        query_fingerprint,
+                        attempt,
+                        len(results),
+                        elapsed_ms,
+                        params_count,
+                    )
                 
                 cursor.close()
                 self.connection_pool.putconn(conn)
@@ -139,6 +175,15 @@ class RedshiftService:
                 
             except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
                 last_error = e
+                elapsed_ms = (time.perf_counter() - t_query_start) * 1000
+                logger.error(
+                    "[REDSHIFT] Connection/query error fp=%s attempt=%s/%s elapsed=%.2fms error=%s",
+                    query_fingerprint,
+                    attempt,
+                    max_attempts,
+                    elapsed_ms,
+                    str(e),
+                )
                 print(f"⚠️  Connection error on attempt {attempt}/{max_attempts}: {e}")
                 # Close broken connection, don't return it to pool
                 if conn is not None:
@@ -156,6 +201,13 @@ class RedshiftService:
                     print(f"⏳ Retrying in {backoff}s...")
                     time.sleep(backoff)
             except Exception as e:
+                elapsed_ms = (time.perf_counter() - t_query_start) * 1000
+                logger.exception(
+                    "[REDSHIFT] Unexpected error fp=%s attempt=%s elapsed=%.2fms",
+                    query_fingerprint,
+                    attempt,
+                    elapsed_ms,
+                )
                 print(f"❌ Error executing query: {e}")
                 import traceback
                 print(f"Traceback:\n{traceback.format_exc()}")

@@ -22,6 +22,14 @@ class Settings:
     REDSHIFT_KEEPALIVE_IDLE: int = int(os.getenv("REDSHIFT_KEEPALIVE_IDLE", "30"))
     REDSHIFT_QUERY_TIMEOUT: int = int(os.getenv("REDSHIFT_QUERY_TIMEOUT", "30000"))
     REDSHIFT_RETRY_ATTEMPTS: int = int(os.getenv("REDSHIFT_RETRY_ATTEMPTS", "2"))
+    REDSHIFT_SLOW_QUERY_MS: int = int(os.getenv("REDSHIFT_SLOW_QUERY_MS", "5000"))
+    REDSHIFT_SLOW_POOL_WAIT_MS: int = int(os.getenv("REDSHIFT_SLOW_POOL_WAIT_MS", "500"))
+
+    # ZIP request guards (seconds)
+    ZIP_REQUEST_TIMEOUT_SEC: int = int(os.getenv("ZIP_REQUEST_TIMEOUT_SEC", "240"))
+    ZIP_REDSHIFT_TIMEOUT_SEC: int = int(os.getenv("ZIP_REDSHIFT_TIMEOUT_SEC", "45"))
+    ZIP_GENERATION_TIMEOUT_SEC: int = int(os.getenv("ZIP_GENERATION_TIMEOUT_SEC", "210"))
+    ZIP_SLOW_FILE_SEC: float = float(os.getenv("ZIP_SLOW_FILE_SEC", "10"))
     
     # Configuración general
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"

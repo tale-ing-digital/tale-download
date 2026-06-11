@@ -193,6 +193,9 @@ export function handleApiError(error: unknown): string {
       if (axiosError.response.status === 503) {
         return 'Base de datos no disponible. Reconectando...';
       }
+      if (axiosError.response.status === 504) {
+        return 'La descarga excedio el tiempo de espera del servidor. Intente con menos tipos de documento o un rango de fechas mas corto.';
+      }
       const detail = axiosError.response.data?.detail || axiosError.response.data?.error;
       return detail || `Error ${axiosError.response.status}: ${axiosError.response.statusText}`;
     } else if (axiosError.request) {

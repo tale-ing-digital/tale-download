@@ -5,6 +5,7 @@ IMPLEMENTACIÓN CONGELADA - NO MODIFICAR SIN APROBACIÓN
 import io
 import zipfile
 import logging
+import time
 from typing import List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 from datetime import datetime
@@ -12,6 +13,7 @@ import concurrent.futures
 from backend.services.download_service import download_service
 from backend.services.pdf_service import pdf_service
 from backend.utils.file_naming import generate_filename, generate_folder_path, TIPO_UNIDAD_CODES
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +147,11 @@ Soporte: soporte@taleinmobiliaria.com
         logger.info("[ZIP] Added _00_INFO_TALE folder")
     
     @staticmethod
-    def _download_and_process_file(doc: Dict[str, Any], project_code: str) -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
+    def _download_and_process_file(
+        doc: Dict[str, Any],
+        project_code: str,
+        request_id: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[bytes], Optional[str], float, int]:
         """
         Función de trabajo para un solo archivo: descarga, procesa y retorna el resultado.
         Diseñada para ser ejecutada en un thread pool.
@@ -153,6 +159,7 @@ Soporte: soporte@taleinmobiliaria.com
         """
         codigo_proforma = doc.get("codigo_proforma", "UNKNOWN")
         tipo_doc = doc.get("tipo_documento", "Otro")
+        t_file_start = time.perf_counter()
         
         try:
             url = doc.get("url", "")
@@ -179,27 +186,59 @@ Soporte: soporte@taleinmobiliaria.com
                 filename = f"{filename_base}{file_extension}"
             
             zip_path = f"{folder_path}/{filename}"
-            return (zip_path, file_content, None)
+            elapsed_sec = time.perf_counter() - t_file_start
+            file_size = len(file_content)
+            if elapsed_sec >= settings.ZIP_SLOW_FILE_SEC:
+                logger.warning(
+                    "[ZIP:%s] SLOW_FILE proforma=%s tipo=%s elapsed=%.2fs size=%sB",
+                    request_id or "N/A",
+                    codigo_proforma,
+                    tipo_doc,
+                    elapsed_sec,
+                    file_size,
+                )
+            return (zip_path, file_content, None, elapsed_sec, file_size)
 
         except Exception as e:
             error_msg = f"{codigo_proforma} | {tipo_doc} | {str(e)}"
-            return (None, None, error_msg)
+            elapsed_sec = time.perf_counter() - t_file_start
+            logger.warning(
+                "[ZIP:%s] FILE_FAIL proforma=%s tipo=%s elapsed=%.2fs error=%s",
+                request_id or "N/A",
+                codigo_proforma,
+                tipo_doc,
+                elapsed_sec,
+                str(e),
+            )
+            return (None, None, error_msg, elapsed_sec, 0)
     
     @staticmethod
-    def create_zip(documents: List[Dict[str, Any]], project_code: str = None) -> io.BytesIO:
+    def create_zip(
+        documents: List[Dict[str, Any]],
+        project_code: str = None,
+        request_id: Optional[str] = None,
+    ) -> io.BytesIO:
         """Crea un ZIP en streaming con descarga y procesamiento paralelo."""
         zip_buffer = io.BytesIO()
         failed_files = []
         total_docs = len(documents)
+        total_file_elapsed = 0.0
+        total_file_bytes = 0
         
         # Usar máximo 10 workers para no saturar el sistema (rango seguro)
         MAX_WORKERS = min(10, total_docs) if total_docs > 0 else 1
 
-        logger.info(f"[ZIP] Starting parallel ZIP generation: Project={project_code or 'UNKNOWN'}, Total Docs={total_docs}, Workers={MAX_WORKERS}")
+        logger.info(
+            "[ZIP:%s] Starting parallel ZIP generation: Project=%s, Total Docs=%s, Workers=%s",
+            request_id or "N/A",
+            project_code or 'UNKNOWN',
+            total_docs,
+            MAX_WORKERS,
+        )
         
         # Agrupar documentos por carpeta
         grouped_docs = ZipService._group_documents_by_folder(documents, project_code or 'PROJECT')
-        logger.info(f"[ZIP] Grouped into {len(grouped_docs)} folders")
+        logger.info("[ZIP:%s] Grouped into %s folders", request_id or "N/A", len(grouped_docs))
         
         # Procesar todos los documentos en paralelo
         processed_results = []
@@ -208,7 +247,12 @@ Soporte: soporte@taleinmobiliaria.com
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             # Crear lista de futures
             futures = {
-                executor.submit(ZipService._download_and_process_file, doc, project_code or 'PROJECT'): doc
+                executor.submit(
+                    ZipService._download_and_process_file,
+                    doc,
+                    project_code or 'PROJECT',
+                    request_id,
+                ): doc
                 for doc in documents
             }
             
@@ -219,19 +263,42 @@ Soporte: soporte@taleinmobiliaria.com
                 tipo_doc = doc.get("tipo_documento", "Otro")
                 
                 try:
-                    zip_path, content, error_msg = future.result()
+                    zip_path, content, error_msg, elapsed_sec, file_size = future.result()
+                    total_file_elapsed += elapsed_sec
+                    total_file_bytes += file_size
                     
                     if error_msg:
                         failed_files.append(error_msg)
-                        logger.warning(f"[ZIP] ✗ {processed_count}/{total_docs} | FAILED: {error_msg}")
+                        logger.warning(
+                            "[ZIP:%s] ✗ %s/%s | FAILED: %s",
+                            request_id or "N/A",
+                            processed_count,
+                            total_docs,
+                            error_msg,
+                        )
                     else:
                         processed_results.append((zip_path, content))
-                        logger.info(f"[ZIP] ✓ {processed_count}/{total_docs} | {tipo_doc} | {zip_path}")
+                        logger.info(
+                            "[ZIP:%s] ✓ %s/%s | %s | %s | elapsed=%.2fs size=%sB",
+                            request_id or "N/A",
+                            processed_count,
+                            total_docs,
+                            tipo_doc,
+                            zip_path,
+                            elapsed_sec,
+                            file_size,
+                        )
                 
                 except Exception as e:
                     error_msg = f"{doc.get('codigo_proforma', 'UNKNOWN')} | {tipo_doc} | {str(e)}"
                     failed_files.append(error_msg)
-                    logger.warning(f"[ZIP] ✗ {processed_count}/{total_docs} | FAILED: {error_msg}")
+                    logger.warning(
+                        "[ZIP:%s] ✗ %s/%s | FAILED: %s",
+                        request_id or "N/A",
+                        processed_count,
+                        total_docs,
+                        error_msg,
+                    )
         
         # Ahora agregar todos los resultados al ZIP (ya procesados)
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -255,12 +322,22 @@ Soporte: soporte@taleinmobiliaria.com
                     failed_content += f"{fail}\n"
                 
                 zip_file.writestr("FAILED_FILES.txt", failed_content.encode('utf-8'))
-                logger.warning(f"[ZIP] Added FAILED_FILES.txt ({len(failed_files)} errors)")
+                logger.warning("[ZIP:%s] Added FAILED_FILES.txt (%s errors)", request_id or "N/A", len(failed_files))
         
         zip_buffer.seek(0)
         
         success_count = total_docs - len(failed_files)
-        logger.info(f"[ZIP] Completed: {success_count}/{total_docs} successful, {len(failed_files)} failed")
+        avg_file_sec = (total_file_elapsed / total_docs) if total_docs > 0 else 0.0
+        logger.info(
+            "[ZIP:%s] Completed: %s/%s successful, %s failed, total_file_elapsed=%.2fs avg_file_elapsed=%.2fs total_bytes=%sB",
+            request_id or "N/A",
+            success_count,
+            total_docs,
+            len(failed_files),
+            total_file_elapsed,
+            avg_file_sec,
+            total_file_bytes,
+        )
         
         return zip_buffer
 
