@@ -5,9 +5,10 @@ import asyncio
 import logging
 import time
 import uuid
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from typing import Optional
+from backend.services import job_store
 from backend.api.models import (
     DocumentListResponse,
     ProjectListResponse,
@@ -289,3 +290,197 @@ async def download_project_zip(
             total_elapsed,
         )
         raise HTTPException(status_code=500, detail=f"Error creating project ZIP: {str(e)}")
+
+
+# ============================================================================
+# BACKGROUND JOB ENDPOINTS  (/api/jobs/*)
+# ============================================================================
+# These endpoints allow long-running ZIP builds to run in the background so
+# the HTTP connection is freed immediately. The client polls /status every few
+# seconds and auto-downloads when status == "done".
+#
+# Why this is necessary:
+#   S3 (Sperant) serves files at ~17 s each. With 100+ documents a synchronous
+#   request exceeds the ZIP_REQUEST_TIMEOUT_SEC limit and the proxy's idle
+#   timeout, resulting in a 504. Background jobs remove that ceiling entirely.
+# ============================================================================
+
+@router.post("/jobs/zip")
+async def submit_zip_job(
+    background_tasks: BackgroundTasks,
+    project_code: str,
+    document_types: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+):
+    """
+    Enqueue a ZIP build job and return a job_id immediately.
+
+    The client should then poll GET /api/jobs/{job_id}/status every few seconds
+    and trigger GET /api/jobs/{job_id}/download when status == 'done'.
+    """
+    job_id = uuid.uuid4().hex[:12]
+    job_store.put_job(job_id, project_code)
+    background_tasks.add_task(
+        _run_zip_job,
+        job_id=job_id,
+        project_code=project_code,
+        document_types=document_types,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    logger.info(
+        "[JOB:%s] Enqueued project=%s types=%s start=%s end=%s",
+        job_id, project_code, document_types, start_date, end_date,
+    )
+    return {"job_id": job_id, "status": "queued"}
+
+
+@router.get("/jobs/{job_id}/status")
+async def get_zip_job_status(job_id: str):
+    """
+    Return current progress for a ZIP job.
+
+    Response: { job_id, status, done, total, pct, error }
+      status: "queued" | "processing" | "done" | "error"
+      done / total: file counts (0/0 while queued / during Redshift phase)
+      pct: integer 0-100
+    """
+    job = job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    total = job.get("total", 0)
+    done = job.get("done", 0)
+    pct = int(done * 100 / total) if total > 0 else 0
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "done": done,
+        "total": total,
+        "pct": pct,
+        "error": job.get("error"),
+    }
+
+
+@router.get("/jobs/{job_id}/download")
+async def download_zip_job_file(job_id: str):
+    """
+    Stream the completed ZIP file. Only available when status == 'done'.
+    The file will remain available for ~20 minutes after completion.
+    """
+    job = job_store.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found or expired")
+    if job["status"] != "done":
+        raise HTTPException(
+            status_code=409,
+            detail=f"ZIP is not ready yet (status={job['status']})",
+        )
+    zip_path = job_store.get_zip_path(job_id)
+    if zip_path is None:
+        raise HTTPException(status_code=410, detail="ZIP file expired or was already deleted")
+
+    project_code = job["project_code"]
+    filename = f"{project_code}.zip"
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _run_zip_job(
+    job_id: str,
+    project_code: str,
+    document_types: Optional[str],
+    start_date: Optional[str],
+    end_date: Optional[str],
+) -> None:
+    """
+    Background coroutine that executes the Redshift query + ZIP generation
+    and updates the job state at each phase.
+    """
+    request_id = job_id[:8]
+    try:
+        job_store.update_job(job_id, status="processing")
+
+        # Normalize document types
+        doc_type_list = None
+        if document_types:
+            doc_type_list = list(
+                dict.fromkeys(t.strip() for t in document_types.split(",") if t.strip())
+            )
+
+        logger.info(
+            "[JOB:%s] START project=%s types=%s start=%s end=%s",
+            job_id, project_code, doc_type_list, start_date, end_date,
+        )
+
+        # ── Phase 1: Redshift query ──────────────────────────────────────────
+        try:
+            documents_data = await asyncio.wait_for(
+                asyncio.to_thread(
+                    redshift_service.get_documents,
+                    project_code=project_code,
+                    document_types=doc_type_list,
+                    start_date=start_date,
+                    end_date=end_date,
+                    limit=100000,
+                ),
+                timeout=settings.ZIP_REDSHIFT_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            job_store.set_job_error(
+                job_id,
+                "Timeout consultando Redshift. Intente con un rango de fechas más corto.",
+            )
+            logger.error("[JOB:%s] REDSHIFT_TIMEOUT", job_id)
+            return
+        except RuntimeError as e:
+            job_store.set_job_error(job_id, f"Base de datos no disponible: {e}")
+            logger.error("[JOB:%s] REDSHIFT_UNAVAILABLE error=%s", job_id, e)
+            return
+
+        if not documents_data:
+            job_store.set_job_error(
+                job_id,
+                f"No se encontraron documentos para el proyecto {project_code} con los filtros seleccionados.",
+            )
+            return
+
+        total = len(documents_data)
+        job_store.update_job(job_id, total=total, done=0)
+        logger.info("[JOB:%s] REDSHIFT_OK docs=%s", job_id, total)
+
+        # ── Phase 2: ZIP generation ──────────────────────────────────────────
+        # No asyncio timeout here — the job runs in background, time pressure is gone.
+        def _progress(done: int, total_: int) -> None:
+            job_store.update_job(job_id, done=done, total=total_)
+
+        try:
+            zip_buffer = await asyncio.to_thread(
+                zip_service.create_zip,
+                documents_data,
+                project_code=project_code,
+                request_id=request_id,
+                progress_callback=_progress,
+            )
+        except Exception as e:
+            job_store.set_job_error(job_id, f"Error generando ZIP: {e}")
+            logger.exception("[JOB:%s] ZIP_FAIL", job_id)
+            return
+
+        job_store.set_job_done(job_id, zip_buffer)
+        logger.info("[JOB:%s] DONE project=%s docs=%s", job_id, project_code, total)
+
+        # Cleanup expired jobs opportunistically
+        removed = job_store.cleanup_old_jobs()
+        if removed:
+            logger.info("[JOB] Cleaned up %s expired job(s)", removed)
+
+    except Exception as e:
+        job_store.set_job_error(job_id, f"Error inesperado: {e}")
+        logger.exception("[JOB:%s] UNEXPECTED_ERROR", job_id)
+

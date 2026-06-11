@@ -6,7 +6,7 @@ import io
 import zipfile
 import logging
 import time
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Callable, List, Dict, Any, Tuple, Optional
 from collections import defaultdict
 from datetime import datetime
 import concurrent.futures
@@ -217,6 +217,7 @@ Soporte: soporte@taleinmobiliaria.com
         documents: List[Dict[str, Any]],
         project_code: str = None,
         request_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> io.BytesIO:
         """Crea un ZIP en streaming con descarga y procesamiento paralelo."""
         zip_buffer = io.BytesIO()
@@ -225,8 +226,8 @@ Soporte: soporte@taleinmobiliaria.com
         total_file_elapsed = 0.0
         total_file_bytes = 0
         
-        # Usar máximo 10 workers para no saturar el sistema (rango seguro)
-        MAX_WORKERS = min(10, total_docs) if total_docs > 0 else 1
+        # Usar máximo 20 workers para descargas S3 paralelas (I/O bound, seguro aumentar)
+        MAX_WORKERS = min(20, total_docs) if total_docs > 0 else 1
 
         logger.info(
             "[ZIP:%s] Starting parallel ZIP generation: Project=%s, Total Docs=%s, Workers=%s",
@@ -299,6 +300,12 @@ Soporte: soporte@taleinmobiliaria.com
                         total_docs,
                         error_msg,
                     )
+
+                if progress_callback:
+                    try:
+                        progress_callback(processed_count, total_docs)
+                    except Exception:
+                        pass
         
         # Ahora agregar todos los resultados al ZIP (ya procesados)
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:

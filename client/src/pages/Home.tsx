@@ -11,10 +11,14 @@ import {
   getProjectsList,
   getDocuments,
   downloadProjectZip,
+  submitZipJob,
+  pollJobStatus,
+  downloadJobFile,
   handleApiError,
   isServiceUnavailable,
   type Document,
   type Project,
+  type ZipJobStatus,
 } from '@/lib/api';
 
 interface FilterState {
@@ -48,6 +52,10 @@ export default function Home() {
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
   const [projectDocuments, setProjectDocuments] = useState<Record<string, Document[]>>({});
   const [loadingDocs, setLoadingDocs] = useState<string | null>(null);
+
+  // Background job tracking: projectCode → latest job status
+  const [activeJobs, setActiveJobs] = useState<Record<string, ZipJobStatus & { jobId: string }>>({});
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Filtrar proyectos según búsqueda
   const filteredProjects = useMemo(() => {
@@ -113,6 +121,68 @@ export default function Home() {
     };
   }, []);
 
+  // ── Background job polling ────────────────────────────────────────────────
+  // Start a 3-second interval whenever there are active jobs, stop it when idle.
+  useEffect(() => {
+    const hasActiveJobs = Object.values(activeJobs).some(
+      (j) => j.status === 'queued' || j.status === 'processing',
+    );
+
+    if (!hasActiveJobs) {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      return;
+    }
+
+    if (pollingRef.current) return; // already polling
+
+    pollingRef.current = setInterval(async () => {
+      const jobs = { ...activeJobs };
+      let changed = false;
+
+      for (const [projectCode, job] of Object.entries(jobs)) {
+        if (job.status !== 'queued' && job.status !== 'processing') continue;
+
+        try {
+          const status = await pollJobStatus(job.jobId);
+          jobs[projectCode] = { ...status, jobId: job.jobId };
+          changed = true;
+
+          if (status.status === 'done') {
+            // Trigger browser download then clear the job entry
+            try {
+              await downloadJobFile(job.jobId, projectCode);
+              toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`);
+            } catch (dlErr) {
+              toast.error(`Error al descargar el ZIP: ${handleApiError(dlErr)}`);
+            }
+            delete jobs[projectCode];
+          } else if (status.status === 'error') {
+            toast.error(
+              status.error || `Error generando ZIP de ${projectCode}. Intente nuevamente.`,
+            );
+            delete jobs[projectCode];
+          }
+        } catch {
+          // Poll error — job may have expired; silently remove
+          delete jobs[projectCode];
+          changed = true;
+        }
+      }
+
+      if (changed) setActiveJobs({ ...jobs });
+    }, 3000);
+
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [activeJobs]);
+
   const loadInitialData = async () => {
     setLoading(true);
     setConnectionError(false);
@@ -133,29 +203,35 @@ export default function Home() {
   };
 
   const handleDownloadProjectZip = async (projectCode: string) => {
+    // Prevent double-click while a job is already in flight
+    if (activeJobs[projectCode]) return;
+
     setDownloading(projectCode);
-    const toastId = toast.loading(`Generando ZIP del proyecto ${projectCode}... Esto puede tardar varios minutos dependiendo del tamaño.`);
     try {
-      // Construir query params CON los filtros APLICADOS
-      const params = new URLSearchParams();
-      
-      if (appliedFilters.documentTypes.length > 0) {
-        params.append('document_types', appliedFilters.documentTypes.join(','));
-      }
-      if (appliedFilters.startDate) {
-        params.append('start_date', appliedFilters.startDate);
-      }
-      if (appliedFilters.endDate) {
-        params.append('end_date', appliedFilters.endDate);
-      }
-      
-      const queryString = params.toString();
-      const url = queryString ? `?${queryString}` : '';
-      
-      await downloadProjectZip(projectCode, url);
-      toast.success(`ZIP del proyecto ${projectCode} descargado exitosamente`, { id: toastId });
+      const params: Record<string, string> = {};
+      if (appliedFilters.documentTypes.length > 0)
+        params.document_types = appliedFilters.documentTypes.join(',');
+      if (appliedFilters.startDate) params.start_date = appliedFilters.startDate;
+      if (appliedFilters.endDate) params.end_date = appliedFilters.endDate;
+
+      const { job_id } = await submitZipJob(projectCode, params);
+
+      // Seed the job map so polling starts immediately
+      setActiveJobs((prev) => ({
+        ...prev,
+        [projectCode]: {
+          jobId: job_id,
+          job_id,
+          status: 'queued',
+          done: 0,
+          total: 0,
+          pct: 0,
+          error: null,
+        },
+      }));
+      toast.info(`Preparando ZIP de ${projectCode}… Recibirás la descarga automáticamente cuando esté listo.`);
     } catch (error) {
-      toast.error(handleApiError(error), { id: toastId });
+      toast.error(handleApiError(error));
     } finally {
       setDownloading(null);
     }
@@ -437,16 +513,53 @@ export default function Home() {
 
                           {/* BOTONES */}
                           <div className="flex flex-col gap-2 pt-2">
-                            <Button
-                              onClick={() => handleDownloadProjectZip(project.codigo_proyecto)}
-                              variant="default"
-                              size="sm"
-                              className="w-full"
-                              disabled={downloading === project.codigo_proyecto}
-                            >
-                              <DownloadIcon className="mr-2 w-4 h-4" />
-                              {downloading === project.codigo_proyecto ? 'Descargando...' : 'Descargar ZIP'}
-                            </Button>
+                            {(() => {
+                              const job = activeJobs[project.codigo_proyecto];
+                              const isSubmitting = downloading === project.codigo_proyecto;
+                              const isActive = !!job || isSubmitting;
+
+                              let label: React.ReactNode = (
+                                <>
+                                  <DownloadIcon className="mr-2 w-4 h-4" />
+                                  Descargar ZIP
+                                </>
+                              );
+
+                              if (isSubmitting) {
+                                label = 'Enviando...';
+                              } else if (job) {
+                                if (job.status === 'queued') {
+                                  label = 'Consultando BD...';
+                                } else if (job.status === 'processing') {
+                                  const pctText = job.total > 0
+                                    ? `${job.done}/${job.total} (${job.pct}%)`
+                                    : 'Iniciando...';
+                                  label = (
+                                    <span className="flex flex-col items-center w-full gap-1">
+                                      <span className="text-xs">Preparando ZIP… {pctText}</span>
+                                      <span className="w-full h-1 rounded bg-primary/20 overflow-hidden">
+                                        <span
+                                          className="block h-full bg-primary transition-all duration-500"
+                                          style={{ width: `${job.pct}%` }}
+                                        />
+                                      </span>
+                                    </span>
+                                  );
+                                }
+                              }
+
+                              return (
+                                <Button
+                                  onClick={() => handleDownloadProjectZip(project.codigo_proyecto)}
+                                  variant="default"
+                                  size="sm"
+                                  className="w-full"
+                                  disabled={isActive}
+                                >
+                                  {label}
+                                </Button>
+                              );
+                            })()}
 
                             <Button
                               onClick={() => handleExpandProject(project.codigo_proyecto)}

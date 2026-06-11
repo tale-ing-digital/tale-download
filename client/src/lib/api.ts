@@ -215,3 +215,55 @@ export function isServiceUnavailable(error: unknown): boolean {
   }
   return false;
 }
+
+// ============================================================================
+// BACKGROUND JOB API  (/api/jobs/*)
+// ============================================================================
+
+export interface ZipJobStatus {
+  job_id: string;
+  status: 'queued' | 'processing' | 'done' | 'error';
+  done: number;
+  total: number;
+  pct: number;
+  error: string | null;
+}
+
+/**
+ * Enqueue a background ZIP job. Returns immediately with a job_id.
+ * The client should then poll pollJobStatus() until status == 'done'.
+ */
+export async function submitZipJob(
+  projectCode: string,
+  params: { document_types?: string; start_date?: string; end_date?: string },
+): Promise<{ job_id: string; status: string }> {
+  const response = await apiClient.post<{ job_id: string; status: string }>(
+    '/jobs/zip',
+    null,
+    { params: { project_code: projectCode, ...params } },
+  );
+  return response.data;
+}
+
+/** Poll the current status of a background ZIP job. */
+export async function pollJobStatus(jobId: string): Promise<ZipJobStatus> {
+  const response = await apiClient.get<ZipJobStatus>(`/jobs/${jobId}/status`);
+  return response.data;
+}
+
+/** Trigger a browser download of the completed ZIP file. */
+export async function downloadJobFile(jobId: string, projectCode: string): Promise<void> {
+  const response = await apiClient.get(`/jobs/${jobId}/download`, {
+    responseType: 'blob',
+    timeout: 120000,
+  });
+  const blob = new Blob([response.data], { type: 'application/zip' });
+  const urlObj = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = urlObj;
+  link.download = `${projectCode}.zip`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(urlObj);
+}
