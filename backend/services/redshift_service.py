@@ -176,12 +176,20 @@ class RedshiftService:
             except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
                 last_error = e
                 elapsed_ms = (time.perf_counter() - t_query_start) * 1000
+                error_msg = str(e).lower()
+                # statement_timeout cancela solo ESTA query; el pool sigue sano.
+                # Reinicializarlo aquí mataría las queries en curso de otros requests.
+                is_statement_timeout = (
+                    "cancelled on user's request" in error_msg
+                    or "statement timeout" in error_msg
+                )
                 logger.error(
-                    "[REDSHIFT] Connection/query error fp=%s attempt=%s/%s elapsed=%.2fms error=%s",
+                    "[REDSHIFT] Connection/query error fp=%s attempt=%s/%s elapsed=%.2fms stmt_timeout=%s error=%s",
                     query_fingerprint,
                     attempt,
                     max_attempts,
                     elapsed_ms,
+                    is_statement_timeout,
                     str(e),
                 )
                 print(f"⚠️  Connection error on attempt {attempt}/{max_attempts}: {e}")
@@ -193,10 +201,12 @@ class RedshiftService:
                         pass
                     conn = None
                 # On failure, reinitialize the entire pool before retrying
+                # (salvo statement_timeout: ahí el pool está sano y se reintenta directo)
                 if attempt < max_attempts:
-                    self._reinitialize_pool()
-                    if self.connection_pool is None:
-                        break
+                    if not is_statement_timeout:
+                        self._reinitialize_pool()
+                        if self.connection_pool is None:
+                            break
                     backoff = min(1.0 * attempt, 3.0)
                     print(f"⏳ Retrying in {backoff}s...")
                     time.sleep(backoff)
@@ -676,21 +686,20 @@ class RedshiftService:
         
         results = self.execute_query(query, params if params else None)
         return [r['codigo_proyecto'] for r in results] if results else []
-        results = self.execute_query(query, tuple(params) if params else None)
-        return [str(row['codigo_proyecto']) for row in results]
 
     def get_projects_with_names(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Obtiene proyectos con sus nombres desde DIM o tabla de referencia"""
         query = """
-        SELECT 
+        SELECT
             pu.codigo_proyecto,
             pu.nombre_proyecto,
             COUNT(*) as total_documentos,
             MAX(a.fecha_carga) as ultima_fecha_carga
         FROM tale.proforma_unidad pu
         INNER JOIN tale.archivos a ON a.codigo_proforma = pu.codigo_proforma
-        WHERE pu.codigo_proyecto IS NOT NULL 
+        WHERE pu.codigo_proyecto IS NOT NULL
           AND pu.nombre_proyecto IS NOT NULL
+          AND a.entidad <> 'Unidad'
         GROUP BY pu.codigo_proyecto, pu.nombre_proyecto
         ORDER BY pu.codigo_proyecto
         """

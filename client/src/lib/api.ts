@@ -157,6 +157,9 @@ export async function getDocumentTypeOptions(): Promise<string[]> {
 export async function getDocuments(filters?: DocumentFilters): Promise<DocumentListResponse> {
   const response = await apiClient.get<DocumentListResponse>('/documents', {
     params: filters,
+    // La consulta de clasificación en Redshift puede tardar más de 30s en frío;
+    // debe superar el statement_timeout del servidor (150s) para recibir su veredicto.
+    timeout: 160000,
   });
   return response.data;
 }

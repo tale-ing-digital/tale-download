@@ -312,8 +312,19 @@ Soporte: soporte@taleinmobiliaria.com
             # 1. Agregar carpeta de información
             ZipService._add_info_folder(zip_file)
             
-            # 2. Agregar archivos procesados
+            # 2. Agregar archivos procesados (deduplicar paths para evitar sobreescritura)
+            seen_paths: set = set()
             for zip_path, content in processed_results:
+                if zip_path in seen_paths:
+                    base, ext = zip_path.rsplit('.', 1) if '.' in zip_path.split('/')[-1] else (zip_path, '')
+                    counter = 2
+                    while True:
+                        candidate = f"{base}_{counter}.{ext}" if ext else f"{base}_{counter}"
+                        if candidate not in seen_paths:
+                            zip_path = candidate
+                            break
+                        counter += 1
+                seen_paths.add(zip_path)
                 zip_file.writestr(zip_path, content)
             
             # 3. Agregar FAILED_FILES.txt si hubo errores

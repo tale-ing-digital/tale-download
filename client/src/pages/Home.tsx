@@ -52,6 +52,7 @@ export default function Home() {
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
   const [projectDocuments, setProjectDocuments] = useState<Record<string, Document[]>>({});
   const [loadingDocs, setLoadingDocs] = useState<string | null>(null);
+  const [docsErrors, setDocsErrors] = useState<Record<string, string>>({});
 
   // Background job tracking: projectCode → latest job status
   const [activeJobs, setActiveJobs] = useState<Record<string, ZipJobStatus & { jobId: string }>>({});
@@ -237,33 +238,44 @@ export default function Home() {
     }
   };
 
+  const loadProjectDocuments = async (projectCode: string) => {
+    setLoadingDocs(projectCode);
+    setDocsErrors(prev => {
+      const next = { ...prev };
+      delete next[projectCode];
+      return next;
+    });
+    try {
+      const response = await getDocuments({
+        project_code: projectCode,
+        limit: 10000,
+        offset: 0,
+        document_types: appliedFilters.documentTypes.length > 0 ? appliedFilters.documentTypes.join(',') : undefined,
+        start_date: appliedFilters.startDate || undefined,
+        end_date: appliedFilters.endDate || undefined,
+      });
+      setProjectDocuments(prev => ({
+        ...prev,
+        [projectCode]: response.documents,
+      }));
+    } catch (error) {
+      const message = handleApiError(error);
+      setDocsErrors(prev => ({ ...prev, [projectCode]: message }));
+      toast.error(message);
+    } finally {
+      setLoadingDocs(null);
+    }
+  };
+
   const handleExpandProject = async (projectCode: string) => {
     if (expandedProject === projectCode) {
       setExpandedProject(null);
     } else {
       setExpandedProject(projectCode);
-      
+
       // Cargar documentos si no están cacheados, usando filtros APLICADOS
       if (!projectDocuments[projectCode]) {
-        setLoadingDocs(projectCode);
-        try {
-          const response = await getDocuments({
-            project_code: projectCode,
-            limit: 10000,
-            offset: 0,
-            document_types: appliedFilters.documentTypes.length > 0 ? appliedFilters.documentTypes.join(',') : undefined,
-            start_date: appliedFilters.startDate || undefined,
-            end_date: appliedFilters.endDate || undefined,
-          });
-          setProjectDocuments(prev => ({
-            ...prev,
-            [projectCode]: response.documents,
-          }));
-        } catch (error) {
-          toast.error(handleApiError(error));
-        } finally {
-          setLoadingDocs(null);
-        }
+        await loadProjectDocuments(projectCode);
       }
     }
   };
@@ -274,6 +286,7 @@ export default function Home() {
     
     // Limpiar caché de documentos para forzar recarga con nuevos filtros
     setProjectDocuments({});
+    setDocsErrors({});
     setExpandedProject(null);
     
     // Mensaje de confirmación
@@ -295,6 +308,7 @@ export default function Home() {
     
     // Limpiar caché para forzar recarga sin filtros
     setProjectDocuments({});
+    setDocsErrors({});
     setExpandedProject(null);
     
     // Mensaje de confirmación
@@ -472,6 +486,7 @@ export default function Home() {
                   {filteredProjects.map((project) => {
                     const isExpanded = expandedProject === project.codigo_proyecto;
                     const docs = projectDocuments[project.codigo_proyecto] || [];
+                    const docsError = docsErrors[project.codigo_proyecto];
                     const isLoadingThisProject = loadingDocs === project.codigo_proyecto;
 
                     return (
@@ -580,6 +595,19 @@ export default function Home() {
                                   {[1, 2, 3].map((i) => (
                                     <Skeleton key={i} className="h-10" />
                                   ))}
+                                </div>
+                              ) : docsError ? (
+                                <div className="text-center py-4 space-y-2">
+                                  <p className="text-xs text-destructive">
+                                    No se pudieron cargar los documentos: {docsError}
+                                  </p>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => loadProjectDocuments(project.codigo_proyecto)}
+                                  >
+                                    Reintentar
+                                  </Button>
                                 </div>
                               ) : docs.length === 0 ? (
                                 <p className="text-xs text-muted-foreground text-center py-4">
